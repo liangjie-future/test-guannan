@@ -96,6 +96,9 @@ class DataStore:
             )
             self._conn.commit()
         except sqlite3.IntegrityError:
+            # 回滚失败语句留下的未决事务：否则连接将持有 SQLite 写锁，
+            # 阻塞所有后续写入方直至超时（FP-007 并发注册验证发现的缺陷）
+            self._conn.rollback()
             raise UsernameAlreadyExistsError("用户名已存在") from None
         return cursor.lastrowid
 

@@ -16,6 +16,12 @@ from services.posting import (
     STATUS_OK,
     PostService,
 )
+from services.registration import (
+    MIN_PASSWORD_LENGTH,
+    REASON_PASSWORD_TOO_SHORT,
+    REASON_USERNAME_TAKEN,
+    RegistrationService,
+)
 from services.timeline import TimelineService
 
 __all__ = [
@@ -33,4 +39,8 @@ __all__ = [
     "STATUS_OK",
     "PostService",
     "TimelineService",
+    "MIN_PASSWORD_LENGTH",
+    "REASON_PASSWORD_TOO_SHORT",
+    "REASON_USERNAME_TAKEN",
+    "RegistrationService",
 ]
