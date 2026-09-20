@@ -1,0 +1,215 @@
+"""FP-001 核心数据模型与存储：四表 schema 与 §3.2 契约接口实现."""
+
+import secrets
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+DEFAULT_SESSION_TTL = timedelta(days=7)
+
+_AUTHOR_ID_CHUNK_SIZE = 500
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    author_id  INTEGER NOT NULL REFERENCES users(id),
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_posts_author_id ON posts(author_id);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
+
+CREATE TABLE IF NOT EXISTS follows (
+    follower_id INTEGER NOT NULL REFERENCES users(id),
+    followee_id INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (follower_id, followee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);
+CREATE INDEX IF NOT EXISTS idx_follows_followee_id ON follows(followee_id);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token      TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+"""
+
+
+class StorageError(Exception):
+    """存储层错误基类."""
+
+
+class UsernameAlreadyExistsError(StorageError):
+    """createUser 用户名冲突：「用户名已存在」."""
+
+
+class SelfFollowError(StorageError):
+    """禁止 follower_id = followee_id 的自关注（§3.1 应用层禁止）."""
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+class DataStore:
+    """基于 SQLite 的四类核心数据存储，方法签名即共享契约（任务卡 §3.2）.
+
+    close() 后重新 DataStore(path) 等价于应用重启。
+    """
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self._conn = sqlite3.connect(str(self.path))
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA foreign_keys = ON")
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
+    # ------------------------------------------------------------------ users
+
+    def createUser(self, username, password_hash, salt):
+        """写入用户，返回 user_id；用户名冲突抛 UsernameAlreadyExistsError."""
+        try:
+            cursor = self._conn.execute(
+                "INSERT INTO users (username, password_hash, salt, created_at)"
+                " VALUES (?, ?, ?, ?)",
+                (username, password_hash, salt, _now()),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            raise UsernameAlreadyExistsError("用户名已存在") from None
+        return cursor.lastrowid
+
+    def getUserByUsername(self, username):
+        row = self._conn.execute(
+            "SELECT id, username, password_hash, salt, created_at"
+            " FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def getUserById(self, id):
+        row = self._conn.execute(
+            "SELECT id, username, password_hash, salt, created_at"
+            " FROM users WHERE id = ?",
+            (id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def listUsers(self):
+        rows = self._conn.execute(
+            "SELECT id, username, created_at FROM users"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------ posts
+
+    def createPost(self, author_id, content):
+        """写入帖子（内容不做长度校验，规则归 FP-013），返回完整帖子对象."""
+        created_at = _now()
+        cursor = self._conn.execute(
+            "INSERT INTO posts (author_id, content, created_at) VALUES (?, ?, ?)",
+            (author_id, content, created_at),
+        )
+        self._conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "author_id": author_id,
+            "content": content,
+            "created_at": created_at,
+        }
+
+    def getPostsByAuthorIds(self, author_ids):
+        """按作者集合取帖：保证集合完备，顺序不保证（过滤 / 排序语义归 FP-015）."""
+        ids = list(dict.fromkeys(author_ids))
+        posts = []
+        for start in range(0, len(ids), _AUTHOR_ID_CHUNK_SIZE):
+            chunk = ids[start : start + _AUTHOR_ID_CHUNK_SIZE]
+            placeholders = ", ".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT id, author_id, content, created_at FROM posts"
+                f" WHERE author_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            posts.extend(dict(row) for row in rows)
+        return posts
+
+    # ---------------------------------------------------------------- follows
+
+    def followExists(self, follower_id, followee_id):
+        row = self._conn.execute(
+            "SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?",
+            (follower_id, followee_id),
+        ).fetchone()
+        return row is not None
+
+    def addFollow(self, follower_id, followee_id):
+        """新增单向关注边；幂等（已存在则不重复插入）；自关注抛 SelfFollowError."""
+        if follower_id == followee_id:
+            raise SelfFollowError("不能关注自己")
+        self._conn.execute(
+            "INSERT OR IGNORE INTO follows (follower_id, followee_id) VALUES (?, ?)",
+            (follower_id, followee_id),
+        )
+        self._conn.commit()
+
+    def getFolloweeIds(self, user_id):
+        rows = self._conn.execute(
+            "SELECT followee_id FROM follows WHERE follower_id = ?", (user_id,)
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    # --------------------------------------------------------------- sessions
+
+    def createSession(self, user_id, ttl=None):
+        """建立会话，返回 {token, expires_at}；token 随机不可预测."""
+        ttl = DEFAULT_SESSION_TTL if ttl is None else ttl
+        token = secrets.token_hex(32)
+        expires_at = self._insertSession(token, user_id, ttl)
+        return {"token": token, "expires_at": expires_at}
+
+    def _insertSession(self, token, user_id, ttl):
+        expires_at = (datetime.now(timezone.utc) + ttl).isoformat()
+        self._conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?)",
+            (token, user_id, _now(), expires_at),
+        )
+        self._conn.commit()
+        return expires_at
+
+    def getSession(self, token):
+        """读取会话；无效 / 过期 / 已销毁一律返回 None（过期行惰性清理）."""
+        row = self._conn.execute(
+            "SELECT user_id, expires_at FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if row is None:
+            return None
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            self.destroySession(token)
+            return None
+        return {"user_id": row["user_id"], "expires_at": row["expires_at"]}
+
+    def destroySession(self, token):
+        """销毁会话；不存在的 token 幂等不报错."""
+        self._conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        self._conn.commit()
