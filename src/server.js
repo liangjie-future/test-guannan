@@ -5,11 +5,17 @@ import { createLayout } from './layout.js';
 import { routes } from './routes.js';
 import { escapeHtml } from './html.js';
 import { loadConfig } from './config.js';
+import { defaultCurrentUser } from './current-user.js';
+import { LOGIN_PATH, RESTRICTED_PATHS, createSessionAccess } from './session-access.js';
+import { createMemorySessionStore } from './session-store.js';
 
 /**
- * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）。
- * `'/'` 等页面由 FP-004 统一布局渲染；FP-005 负责监听配置、DATA_DIR
- * 预留（FP-001 持久化目录）与 SIGTERM/SIGINT 优雅停机。
+ * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
+ * + FP-003 会话管理与访问控制（sessionAccess 注入即生效）。
+ *
+ * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
+ * （/users /compose /timeline）挂 requireLogin 守卫、/logout 变为
+ * 销毁动作；未注入时保持 FP-004 基线（恒未登录、全路由占位可达）。
  */
 
 function notFoundContent(pathname) {
@@ -28,8 +34,10 @@ function sendText(response, status, body, extraHeaders = {}) {
   response.end(body);
 }
 
-export function createWebServer({ getCurrentUser } = {}) {
-  const layout = createLayout({ getCurrentUser });
+export function createWebServer({ getCurrentUser = defaultCurrentUser, sessionAccess = null } = {}) {
+  const layout = createLayout({
+    getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
+  });
 
   return http.createServer((request, response) => {
     let pathname;
@@ -50,6 +58,23 @@ export function createWebServer({ getCurrentUser } = {}) {
       return;
     }
 
+    if (sessionAccess) {
+      if (pathname === '/logout') {
+        const token = sessionAccess.sessionTokenFromRequest(request);
+        if (token !== null) sessionAccess.logout(token);
+        response.writeHead(302, {
+          Location: LOGIN_PATH,
+          'Set-Cookie': sessionAccess.clearSessionCookie(),
+        });
+        response.end();
+        return;
+      }
+      if (RESTRICTED_PATHS.includes(pathname)) {
+        const user = sessionAccess.requireLogin(request, response);
+        if (user === null) return;
+      }
+    }
+
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       sendText(response, 405, 'method not allowed\n', { Allow: 'GET' });
       return;
@@ -68,11 +93,13 @@ function formatListenUrl(host, port) {
 
 /**
  * FP-005 启动服务：确保 DATA_DIR 存在（FP-001 持久化承载目录）并监听配置地址。
+ * FP-003 默认注入内存 store 的会话访问控制（生产组装）。
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
-  const server = createWebServer();
+  const sessionAccess = createSessionAccess({ store: createMemorySessionStore() });
+  const server = createWebServer({ sessionAccess });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.host, () => {

@@ -78,6 +78,27 @@ result = service.createPost(author_id, content)
 校验顺序：作者存在 → 内容非空 → 长度 ≤ 280；失败不产生帖子记录。
 发帖界面（FP-012）与时间线可见性（FP-014 / FP-015）由后续任务消费本契约。
 
+## FP-003 会话管理与访问控制
+
+登录成功建会话（Cookie `session_token` 下发，HttpOnly / SameSite=Lax，TTL 7 天）、
+过期 / 退出即失效、未登录访问受限页（用户列表 / 发帖 / 时间线）302 跳转 `/login`：
+
+```js
+import { createSessionAccess } from './src/session-access.js';
+import { createMemorySessionStore } from './src/session-store.js';
+
+const sessionAccess = createSessionAccess({ store: createMemorySessionStore() });
+sessionAccess.createSessionOnLogin(userId); // → {token, expires_at}（Set-Cookie 用 sessionCookie()）
+sessionAccess.currentUser(request);          // → {id, username} | null
+sessionAccess.requireLogin(request, res);   // 已登录放行；未登录 302 → /login
+sessionAccess.logout(token);                // 销毁会话（幂等）
+```
+
+存取原语按 FP-001 §3.2 契约（`createSession / getSession / destroySession /
+getUserById`）注入；默认内存实现含种子：alice（id=1）、有效会话 `seed-token-1`、
+过期会话 `seed-token-expired`。`./run start` 生产入口默认启用访问控制
+（受限页匿名 302 `/login`，`GET /logout` 销毁会话并清除 Cookie）。
+
 ## 开发与测试
 
 ```bash
