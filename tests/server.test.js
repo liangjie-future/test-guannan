@@ -37,10 +37,9 @@ test('S1: 演示页 / 返回统一布局且五入口可达', async () => {
   });
 });
 
-test('S2: 五入口与 /logout 路由均以统一布局返回占位页', async () => {
+test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页（/register 已由 FP-006 真实页面替代）', async () => {
   await withServer(anonymousUser, async (base) => {
     const owners = {
-      '/register': 'FP-006',
       '/login': 'FP-008',
       '/users': 'FP-010',
       '/compose': 'FP-012',
@@ -56,6 +55,12 @@ test('S2: 五入口与 /logout 路由均以统一布局返回占位页', async (
       assert.ok(html.includes('布局骨架占位'), `${path} 应为占位内容区`);
       assert.ok(html.includes(owner), `${path} 占位应标注归属 ${owner}`);
     }
+
+    const register = await fetch(`${base}/register`);
+    assert.equal(register.status, 200);
+    const registerHtml = await register.text();
+    assert.ok(registerHtml.includes('name="username"'), '/register 应为真实注册表单');
+    assert.ok(!registerHtml.includes('布局骨架占位'), '/register 不再是占位页');
   });
 });
 

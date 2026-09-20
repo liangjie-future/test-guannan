@@ -185,6 +185,31 @@ PBKDF2 比对（诱饵凭证，时序均衡），且任何失败都不产生会�
 按契约形状适配，联调时替换注入即可）；验证用种子用户 bob / 明文
 `right-password`（测试内经 `hashPassword` 建号，明文不入库）。
 
+## FP-006 注册页
+
+注册页 `/register`（Node Web 层，挂载进 FP-004 统一布局）：收集用户名 / 密码
+提交注册，按 §3.2 契约调用可注入的 register 服务并呈现结果——成功下发会话
+Cookie（HttpOnly / SameSite=Lax / TTL 7 天）并 302 跳转 `/timeline`（注册成功
+即进入登录态）；失败 200 重渲染表单并给出原因文案（「用户名已存在」/
+「密码过短」），无任何「已注册」视觉暗示、不下发 Cookie：
+
+```js
+import { createWebServer } from './src/server.js';
+import { createMockRegisterService } from './src/register-service.js';
+
+// §6 可注入 Mock：有状态内存实现（初始为空），三态返回
+// "alice"/"secret123" 首次 OK、再次 USERNAME_TAKEN；"newuser"/"12345" 过短
+const registerService = createMockRegisterService({
+  // 可选：桥接 FP-003 会话（./run start 生产组装默认桥接，注册后时间线即见已登录导航）
+  createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
+});
+const server = createWebServer({ registerService }); // GET/POST /register 即生效
+```
+
+页面侧仅做输入完备性守卫（缺失不触达服务）；用户名唯一 / 密码长度等规则判定
+与建号由 FP-007 `RegistrationService` 承担（跨语言联调时按契约形状替换注入），
+验证用例见 `tests/register-page.test.js`。
+
 ## 开发与测试
 
 ```bash
