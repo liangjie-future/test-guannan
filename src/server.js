@@ -15,17 +15,23 @@ import { createMockPostService } from './post-service.js';
 import { loginPageContent } from './login-page.js';
 import { UNIFIED_LOGIN_ERROR_MESSAGE, MOCK_LOGIN_ACCOUNTS, createMockLoginService } from './login-mock.js';
 import { readFormBody } from './form-body.js';
+import { createMemorySocialStore } from './social-store.js';
+import { createFollowService } from './follow-service.js';
+import { createUsersPage, parseFollowActionPath } from './users-page.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
  * + FP-003 会话管理与访问控制（sessionAccess 注入即生效）
  * + FP-006 注册页（GET/POST /register，registerService 注入，默认 §6 Mock）
  * + FP-012 发帖界面（/compose GET 表单 / POST 提交）
- * + FP-008 登录页与退出入口（POST /login 提交，login 服务注入式）。
+ * + FP-008 登录页与退出入口（POST /login 提交，login 服务注入式）
+ * + FP-010 用户列表页（usersPage 注入即生效：GET /users 动态渲染、
+ *   POST /users/<id>/follow 关注动作）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
- * （/users /compose /timeline）挂 requireLogin 守卫、/logout 变为
+ * （/users /compose /timeline）与关注动作挂 requireLogin 守卫、/logout 变为
  * 销毁动作；未注入时保持 FP-004 基线（恒未登录、全路由占位可达）。
+ * 未注入 usersPage 时 /users 维持 FP-004 占位内容区。
  * /compose 提交一律要求登录：匿名 POST 无论何种组装均 302 登录页。
  * login 按 §3.2 契约注入（默认 §6 Mock：bob / right-password 两态）。
  */
@@ -57,6 +63,7 @@ export function createWebServer({
   registerService = createMockRegisterService(),
   createPost = null,
   login = createMockLoginService(),
+  usersPage = null,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -129,12 +136,40 @@ export function createWebServer({
     sendHtml(response, html);
   }
 
+  /** FP-010 关注动作（仅注入 usersPage 时可达）：登录门槛 + 委托页面处理 + PRG 跳回。 */
+  function handleFollowAction(request, response, followeeId) {
+    const viewer = sessionAccess
+      ? sessionAccess.requireLogin(request, response)
+      : getCurrentUser(request);
+    if (viewer === null) {
+      if (!sessionAccess) {
+        response.writeHead(302, { Location: LOGIN_PATH });
+        response.end();
+      }
+      return;
+    }
+    if (request.method !== 'POST') {
+      sendText(response, 405, 'method not allowed\n', { Allow: 'POST' });
+      return;
+    }
+    const { status, location } = usersPage.handleFollowAction({ currentUser: viewer, followeeId });
+    response.writeHead(status, { Location: location });
+    response.end();
+  }
+
   async function handleRequest(request, response) {
-    let pathname;
+    let url;
     try {
-      pathname = new URL(request.url, 'http://localhost').pathname;
+      url = new URL(request.url, 'http://localhost');
     } catch {
       sendText(response, 400, 'bad request\n');
+      return;
+    }
+    const pathname = url.pathname;
+
+    const followeeId = usersPage === null ? null : parseFollowActionPath(pathname);
+    if (followeeId !== null) {
+      handleFollowAction(request, response, followeeId);
       return;
     }
 
@@ -149,6 +184,7 @@ export function createWebServer({
       return;
     }
 
+    let viewer = null;
     if (sessionAccess) {
       if (pathname === '/logout') {
         const token = sessionAccess.sessionTokenFromRequest(request);
@@ -161,9 +197,11 @@ export function createWebServer({
         return;
       }
       if (RESTRICTED_PATHS.includes(pathname)) {
-        const user = sessionAccess.requireLogin(request, response);
-        if (user === null) return;
+        viewer = sessionAccess.requireLogin(request, response);
+        if (viewer === null) return;
       }
+    } else {
+      viewer = getCurrentUser(request);
     }
 
     if (isComposePage) {
@@ -194,7 +232,16 @@ export function createWebServer({
       return;
     }
 
-    const content = isRegisterPage ? registerPage.renderForm() : route.content;
+    let content = isRegisterPage ? registerPage.renderForm() : route.content;
+    if (usersPage && pathname === '/users') {
+      if (viewer === null) {
+        response.writeHead(302, { Location: LOGIN_PATH });
+        response.end();
+        return;
+      }
+      content = usersPage.renderContent({ currentUser: viewer, searchParams: url.searchParams });
+    }
+
     const title = isRegisterPage ? REGISTER_TITLE : route.title;
     const html = layout.renderPage(request, content, { title });
     sendHtml(response, request.method === 'HEAD' ? undefined : html);
@@ -242,6 +289,7 @@ export function webUsers() {
  * FP-006 默认 Mock 经 createSessionOnLogin 桥接会话存储：注册成功下发的
  * 凭据即被识别，302 时间线直接呈现已登录导航。
  * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
+ * FP-010 默认注入种子内存社交 store 的用户列表页（§6 Mock 策略）。
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
@@ -251,10 +299,18 @@ export async function startServer(config = loadConfig()) {
     createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
   });
   const postService = createMockPostService();
+  const socialStore = createMemorySocialStore();
+  const followService = createFollowService({ store: socialStore });
+  const usersPage = createUsersPage({
+    listUsers: socialStore.listUsers,
+    follow: followService.follow,
+    getFolloweeIds: followService.getFolloweeIds,
+  });
   const server = createWebServer({
     sessionAccess,
     registerService,
     createPost: postService.createPost,
+    usersPage,
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
