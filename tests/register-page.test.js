@@ -207,13 +207,16 @@ test('R10: 生产组装 startServer → 注册成功即已登录（时间线显�
   assert.ok(html.includes('alice'));
 });
 
-test('R11: POST 基线兼容 —— 非注册路由仍 405，注册页 Allow 含 POST', async () => {
+test('R11: POST 基线兼容 —— 非注册/登录路由仍 405，注册页 Allow 含 POST', async () => {
   await withServer({}, async (base) => {
-    const other = await fetch(`${base}/login`, { method: 'POST', redirect: 'manual' });
+    const other = await fetch(`${base}/users`, { method: 'POST', redirect: 'manual' });
     assert.equal(other.status, 405);
     const patch = await fetch(`${base}/register`, { method: 'PUT', redirect: 'manual' });
     assert.equal(patch.status, 405);
     assert.match(patch.headers.get('allow') ?? '', /POST/);
+    const loginPatch = await fetch(`${base}/login`, { method: 'PUT', redirect: 'manual' });
+    assert.equal(loginPatch.status, 405);
+    assert.match(loginPatch.headers.get('allow') ?? '', /POST/);
   });
 });
 

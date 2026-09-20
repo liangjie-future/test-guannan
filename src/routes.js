@@ -1,3 +1,5 @@
+import { loginPageContent } from './login-page.js';
+
 function placeholderContent(pageTitle, owner) {
   return `<section>
   <h1>${pageTitle}</h1>
@@ -17,7 +19,7 @@ export const routes = {
   },
   '/login': {
     title: '登录',
-    content: placeholderContent('登录', 'FP-008 登录页'),
+    content: loginPageContent(),
   },
   '/users': {
     title: '用户列表',

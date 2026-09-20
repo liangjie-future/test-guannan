@@ -7,22 +7,27 @@ import { escapeHtml } from './html.js';
 import { loadConfig } from './config.js';
 import { defaultCurrentUser } from './current-user.js';
 import { LOGIN_PATH, RESTRICTED_PATHS, createSessionAccess } from './session-access.js';
-import { createMemorySessionStore } from './session-store.js';
+import { createMemorySessionStore, seedUsers } from './session-store.js';
 import { REGISTER_PATH, REGISTER_TITLE, createRegisterPage } from './register-page.js';
 import { createMockRegisterService } from './register-service.js';
 import { createComposePage } from './compose.js';
 import { createMockPostService } from './post-service.js';
+import { loginPageContent } from './login-page.js';
+import { UNIFIED_LOGIN_ERROR_MESSAGE, MOCK_LOGIN_ACCOUNTS, createMockLoginService } from './login-mock.js';
+import { readFormBody } from './form-body.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
  * + FP-003 会话管理与访问控制（sessionAccess 注入即生效）
  * + FP-006 注册页（GET/POST /register，registerService 注入，默认 §6 Mock）
- * + FP-012 发帖界面（/compose GET 表单 / POST 提交）。
+ * + FP-012 发帖界面（/compose GET 表单 / POST 提交）
+ * + FP-008 登录页与退出入口（POST /login 提交，login 服务注入式）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）挂 requireLogin 守卫、/logout 变为
  * 销毁动作；未注入时保持 FP-004 基线（恒未登录、全路由占位可达）。
  * /compose 提交一律要求登录：匿名 POST 无论何种组装均 302 登录页。
+ * login 按 §3.2 契约注入（默认 §6 Mock：bob / right-password 两态）。
  */
 
 function notFoundContent(pathname) {
@@ -51,6 +56,7 @@ export function createWebServer({
   sessionAccess = null,
   registerService = createMockRegisterService(),
   createPost = null,
+  login = createMockLoginService(),
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -93,7 +99,37 @@ export function createWebServer({
     sendHtml(response, request.method === 'HEAD' ? undefined : html);
   }
 
-  return http.createServer((request, response) => {
+  /** FP-008 登录提交：成功建会话下发 Cookie 并跳转 /timeline；失败 200 回渲染统一提示。 */
+  async function handleLoginSubmit(request, response) {
+    let form;
+    try {
+      form = await readFormBody(request);
+    } catch (err) {
+      sendText(response, err.statusCode ?? 400, 'bad request\n');
+      return;
+    }
+
+    const result = login(form.get('username') ?? '', form.get('password') ?? '');
+    if (result.status === 'OK') {
+      const headers = { Location: '/timeline' };
+      if (sessionAccess) {
+        const session = sessionAccess.createSessionOnLogin(result.user.id);
+        headers['Set-Cookie'] = sessionAccess.sessionCookie(session);
+      }
+      response.writeHead(302, headers);
+      response.end();
+      return;
+    }
+
+    const html = layout.renderPage(
+      request,
+      loginPageContent({ error: result.message ?? UNIFIED_LOGIN_ERROR_MESSAGE }),
+      { title: routes['/login'].title },
+    );
+    sendHtml(response, html);
+  }
+
+  async function handleRequest(request, response) {
     let pathname;
     try {
       pathname = new URL(request.url, 'http://localhost').pathname;
@@ -146,9 +182,14 @@ export function createWebServer({
       return;
     }
 
+    if (pathname === '/login' && request.method === 'POST') {
+      await handleLoginSubmit(request, response);
+      return;
+    }
+
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       sendText(response, 405, 'method not allowed\n', {
-        Allow: isRegisterPage ? 'GET, POST' : 'GET',
+        Allow: isRegisterPage || pathname === '/login' ? 'GET, POST' : 'GET',
       });
       return;
     }
@@ -157,6 +198,16 @@ export function createWebServer({
     const title = isRegisterPage ? REGISTER_TITLE : route.title;
     const html = layout.renderPage(request, content, { title });
     sendHtml(response, request.method === 'HEAD' ? undefined : html);
+  }
+
+  return http.createServer((request, response) => {
+    handleRequest(request, response).catch((err) => {
+      if (response.headersSent) {
+        response.destroy(err);
+        return;
+      }
+      sendText(response, 500, 'internal server error\n');
+    });
   });
 }
 
@@ -166,8 +217,28 @@ function formatListenUrl(host, port) {
 }
 
 /**
+ * Web 组装用户表：FP-003 种子 alice + FP-008 §6 登录替身（bob，id=2）。
+ * 替身记录使 Mock 登录成功后 currentUser → getUserById 可解析（登录态贯通）。
+ */
+export function webUsers() {
+  const users = seedUsers(Date.now());
+  const createdAt = new Date().toISOString();
+  for (const account of MOCK_LOGIN_ACCOUNTS) {
+    users.set(account.id, {
+      id: account.id,
+      username: account.username,
+      password_hash: `hash-${account.username}-placeholder`,
+      salt: `salt-${account.username}-placeholder`,
+      created_at: createdAt,
+    });
+  }
+  return users;
+}
+
+/**
  * FP-005 启动服务：确保 DATA_DIR 存在（FP-001 持久化承载目录）并监听配置地址。
- * FP-003 默认注入内存 store 的会话访问控制（生产组装）。
+ * FP-003 默认注入内存 store 的会话访问控制（生产组装，FP-008 webUsers() 种子：
+ * alice + 登录替身 bob 进入用户表）。
  * FP-006 默认 Mock 经 createSessionOnLogin 桥接会话存储：注册成功下发的
  * 凭据即被识别，302 时间线直接呈现已登录导航。
  * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
@@ -175,7 +246,7 @@ function formatListenUrl(host, port) {
  */
 export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
-  const sessionAccess = createSessionAccess({ store: createMemorySessionStore() });
+  const sessionAccess = createSessionAccess({ store: createMemorySessionStore({ users: webUsers() }) });
   const registerService = createMockRegisterService({
     createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
   });
