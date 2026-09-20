@@ -78,6 +78,31 @@ result = service.createPost(author_id, content)
 校验顺序：作者存在 → 内容非空 → 长度 ≤ 280；失败不产生帖子记录。
 发帖界面（FP-012）与时间线可见性（FP-014 / FP-015）由后续任务消费本契约。
 
+## FP-002 密码加密存储
+
+单向慢散列 + 独立随机盐的纯能力接口（Python 标准库，零第三方依赖），
+供注册建号（写入侧）与登录校验（比对侧）消费：
+
+```python
+from security import hashPassword, verifyPassword
+
+creds = hashPassword("password123")     # → {"hash": <hex>, "salt": <hex>}，明文不入库
+store.createUser("alice", creds["hash"], creds["salt"])
+
+row = store.getUserByUsername("alice")
+verifyPassword("password123", row["salt"], row["password_hash"])  # → True
+```
+
+算法 PBKDF2-HMAC-SHA256，600,000 次迭代（OWASP 现行建议值），盐为 CSPRNG
+128 bit、每次独立生成；比对用 `hmac.compare_digest` 恒时比较。模块零日志，
+返回值不含明文（不落盘 / 不进日志 / 不进响应的检查口径见
+docs/designs/FP-002-password-hash.md）。验证用种子用户
+（`seed-password-a` / `seed-password-b`，明文样例 `password123` / `hunter2`）：
+
+```bash
+python -m security.seed data/social.db
+```
+
 ## FP-003 会话管理与访问控制
 
 登录成功建会话（Cookie `session_token` 下发，HttpOnly / SameSite=Lax，TTL 7 天）、
