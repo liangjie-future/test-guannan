@@ -279,6 +279,28 @@ createWebServer({ sessionAccess, usersPage });     // GET /users + POST /users/:
 （FP-003 守卫）。`./run start` 生产入口默认注入（种子内存 store，
 `seed-token-1` 即 alice 会话）。
 
+## FP-014 时间线页面
+
+时间线页面（登录后首页 / 默认落点，`src/timeline.js`）：聚合呈现全部被关注对象的帖子
+（作者 / 内容 / 发布时间），按 `getTimeline` 服务返回顺序原样渲染（倒序由 FP-015 保证，
+页面不重排）；未关注任何人显示空态提示「还没有关注任何人」并引导去用户列表：
+
+```js
+import { createTimelinePage, createMockGetTimeline } from './src/timeline.js';
+
+const page = createTimelinePage({ getTimeline });  // getTimeline(user_id) → [post]（FP-015 契约）
+page.render({ id, username });                     // → 时间线内容区 HTML（挂载进 FP-004 统一布局）
+```
+
+- 登录门槛：`/timeline` ∈ FP-003 `RESTRICTED_PATHS`（未登录 302 `/login`）；
+- 默认落点：已登录访问 `/` 302 → `/timeline`（未登录保持 FP-004 演示页）；
+- `getTimeline` 构造注入，未桥接前默认 §6 Mock（场景 A：B/C 各 2 帖倒序种子流；
+  场景 B：空集合供空态验证），联调时替换注入即可。
+
+```bash
+curl -i -H 'Cookie: session_token=seed-token-1' http://127.0.0.1:3000/timeline
+```)
+
 ## 开发与测试
 
 ```bash
