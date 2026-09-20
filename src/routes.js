@@ -15,10 +15,6 @@ export const routes = {
   <p>导航登录态由 currentUser 注入点提供（FP-003 会话管理联调；未合入时默认未登录）。</p>
 </section>`,
   },
-  '/register': {
-    title: '注册',
-    content: placeholderContent('注册', 'FP-006 注册页'),
-  },
   '/login': {
     title: '登录',
     content: placeholderContent('登录', 'FP-008 登录页'),
