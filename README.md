@@ -251,6 +251,34 @@ FP-009 产在 Python，Node Web 进程按契约以 `src/login-mock.js` 的可注
 替代（bob / `right-password` OK 态、任意错误组合统一失败态）；真实桥接属
 集成点（`createWebServer({ login })` 替换注入即可，页面 / 流程零改动）。
 
+## FP-010 全站用户列表页
+
+登录门槛后的全站找人页（上游 D4：全站用户列表，无搜索）：展示全部存在用户
+（含自己，自己行有区分标识且不提供可用关注操作），每行关注按钮点击后调用
+follow 服务并经 PRG 反馈关注结果 / 更新已关注状态：
+
+```js
+import { createUsersPage } from './src/users-page.js';
+import { createMemorySocialStore } from './src/social-store.js';
+import { createFollowService } from './src/follow-service.js';
+
+const store = createMemorySocialStore();          // 种子：alice/bob/carol，alice→bob
+const followService = createFollowService({ store });
+const usersPage = createUsersPage({
+  listUsers: store.listUsers,                      // FP-001 契约注入
+  follow: followService.follow,                    // FP-011 契约注入（三态结果）
+  getFolloweeIds: followService.getFolloweeIds,
+});
+createWebServer({ sessionAccess, usersPage });     // GET /users + POST /users/:id/follow
+```
+
+`follow(f, g)` 返回 `{status:'OK', created}`（新建 / 幂等）或
+`{status:'ERROR', reason}`（`SELF_FOLLOW_NOT_ALLOWED` / `FOLLOWEE_NOT_FOUND`），
+规则语义与 Python 侧 `services/follow.py` 一致；自己行不渲染关注表单，
+直连自关注 POST 由服务端规则兜底拒绝。匿名访问（含关注动作）302 `/login`
+（FP-003 守卫）。`./run start` 生产入口默认注入（种子内存 store，
+`seed-token-1` 即 alice 会话）。
+
 ## 开发与测试
 
 ```bash
