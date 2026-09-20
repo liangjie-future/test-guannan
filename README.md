@@ -59,6 +59,25 @@ svc.getFollowees(1)     # → [2, ...] 被关注者 id 集合（时间线聚合 
 错误语义：自关注抛 `SelfFollowNotAllowedError`（「不可关注自己」）；被关注者不存在抛
 `FolloweeNotFoundError`（「用户不存在」）；两者均为 `FollowError` 子类。
 
+## FP-013 发帖内容规则
+
+发帖业务核心服务（`services.PostService`，消费 FP-001 存储）：校验帖子为
+1–280 字非空纯文本（去首尾空白后按码点计，上限 280 含边界），通过后落库并
+关联作者与创建时间：
+
+```python
+from services import PostService
+from storage import DataStore
+
+service = PostService(DataStore("data/social.db"))
+result = service.createPost(author_id, content)
+# 成功：{"status": "OK", "post": {id, author_id, content, created_at}}
+# 失败：{"status": "ERROR", "reason": "AUTHOR_NOT_FOUND" | "EMPTY_CONTENT" | "TOO_LONG"}
+```
+
+校验顺序：作者存在 → 内容非空 → 长度 ≤ 280；失败不产生帖子记录。
+发帖界面（FP-012）与时间线可见性（FP-014 / FP-015）由后续任务消费本契约。
+
 ## 开发与测试
 
 ```bash

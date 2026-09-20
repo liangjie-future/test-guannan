@@ -1,8 +1,4 @@
-"""FP-011 关注关系规则：FollowService 与错误类型.
-
-对外提供 follow / getFollowees 能力（§3.2 共享契约），消费 FP-001 存储
-契约（或其内存模拟）。
-"""
+"""services: 业务规则服务层."""
 
 from services.follow import (
     FollowError,
@@ -10,10 +6,26 @@ from services.follow import (
     FollowService,
     SelfFollowNotAllowedError,
 )
+from services.posting import (
+    MAX_POST_LENGTH,
+    REASON_AUTHOR_NOT_FOUND,
+    REASON_EMPTY_CONTENT,
+    REASON_TOO_LONG,
+    STATUS_ERROR,
+    STATUS_OK,
+    PostService,
+)
 
 __all__ = [
     "FollowError",
     "FolloweeNotFoundError",
     "FollowService",
     "SelfFollowNotAllowedError",
+    "MAX_POST_LENGTH",
+    "REASON_AUTHOR_NOT_FOUND",
+    "REASON_EMPTY_CONTENT",
+    "REASON_TOO_LONG",
+    "STATUS_ERROR",
+    "STATUS_OK",
+    "PostService",
 ]
