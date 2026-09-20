@@ -78,6 +78,24 @@ result = service.createPost(author_id, content)
 校验顺序：作者存在 → 内容非空 → 长度 ≤ 280；失败不产生帖子记录。
 发帖界面（FP-012）与时间线可见性（FP-014 / FP-015）由后续任务消费本契约。
 
+## FP-015 时间线聚合与排序
+
+时间线业务核心服务（`services.TimelineService`，消费 FP-001 存储）：按全部被关注
+用户集合聚合帖子、`created_at` 倒序返回，仅含被关注对象的帖子（不含自己的、不含
+未关注者的，上游 D7）；未关注任何人返回空集合：
+
+```python
+from services import TimelineService
+from storage import DataStore
+
+service = TimelineService(DataStore("data/social.db"))
+service.getTimeline(user_id)
+# → [{id, author_id, content, created_at, author_username}, ...] 新帖在前
+```
+
+排序按真实时间瞬间（ISO 8601 解析，naive 视为 UTC），不依赖存储返回顺序；作者名
+由本任务经 `getUserById` 一并补齐（`author_username`），页面（FP-014）无需逐帖回查。
+
 ## FP-002 密码加密存储
 
 单向慢散列 + 独立随机盐的纯能力接口（Python 标准库，零第三方依赖），
