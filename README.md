@@ -78,6 +78,28 @@ result = service.createPost(author_id, content)
 校验顺序：作者存在 → 内容非空 → 长度 ≤ 280；失败不产生帖子记录。
 发帖界面（FP-012）与时间线可见性（FP-014 / FP-015）由后续任务消费本契约。
 
+## FP-012 发帖界面
+
+发帖 Web 界面（Node SSR，以内容区挂载进 FP-004 统一布局）：登录门槛
+（FP-003 `requireLogin`，匿名 POST 无论何种组装均 302 `/login`）、纯文本
+输入 + 发布控件 + 实时字数提示「当前 / 280」（码点口径，与 FP-013 一致）；
+提交调用 `createPost` 服务按 §3.2 三态呈现——成功「发布成功」反馈 + 帖子
+摘要 + 空表单，失败展示对应原因（内容为空 / 超过 280 字上限（当前 N 字））
+且帖子未发布、原输入回显保留：
+
+```js
+import { createWebServer } from './src/server.js';
+import { createMockPostService } from './src/post-service.js';
+
+const postService = createMockPostService();       // 契约同形 Mock（§6）
+createWebServer({ createPost: postService.createPost });  // 端口可注入
+```
+
+FP-013 实现产在 Python（`services.PostService`），跨语言桥接属集成点；
+默认注入契约同形的内存 Mock（校验语义对齐：去首尾空白、按码点计、280 含
+边界、失败不落帖）。验证用输入样例（`hello world` / 空 / 全空白 / 281 字 /
+恰 280 字）见 `tests/compose.test.js`。
+
 ## FP-015 时间线聚合与排序
 
 时间线业务核心服务（`services.TimelineService`，消费 FP-001 存储）：按全部被关注

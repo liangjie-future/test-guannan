@@ -10,15 +10,19 @@ import { LOGIN_PATH, RESTRICTED_PATHS, createSessionAccess } from './session-acc
 import { createMemorySessionStore } from './session-store.js';
 import { REGISTER_PATH, REGISTER_TITLE, createRegisterPage } from './register-page.js';
 import { createMockRegisterService } from './register-service.js';
+import { createComposePage } from './compose.js';
+import { createMockPostService } from './post-service.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
  * + FP-003 会话管理与访问控制（sessionAccess 注入即生效）
- * + FP-006 注册页（GET/POST /register，registerService 注入，默认 §6 Mock）。
+ * + FP-006 注册页（GET/POST /register，registerService 注入，默认 §6 Mock）
+ * + FP-012 发帖界面（/compose GET 表单 / POST 提交）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）挂 requireLogin 守卫、/logout 变为
  * 销毁动作；未注入时保持 FP-004 基线（恒未登录、全路由占位可达）。
+ * /compose 提交一律要求登录：匿名 POST 无论何种组装均 302 登录页。
  */
 
 function notFoundContent(pathname) {
@@ -37,15 +41,57 @@ function sendText(response, status, body, extraHeaders = {}) {
   response.end(body);
 }
 
+function sendHtml(response, html, status = 200) {
+  response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
+  response.end(html);
+}
+
 export function createWebServer({
   getCurrentUser = defaultCurrentUser,
   sessionAccess = null,
   registerService = createMockRegisterService(),
+  createPost = null,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
   });
   const registerPage = createRegisterPage({ registerService });
+  const composePage = createComposePage({
+    createPost: createPost ?? createMockPostService().createPost,
+  });
+
+  function resolveUser(request) {
+    return sessionAccess ? sessionAccess.currentUser(request) : getCurrentUser(request);
+  }
+
+  async function handleCompose(request, response) {
+    if (request.method === 'POST') {
+      const user = resolveUser(request);
+      if (user === null) {
+        response.writeHead(302, { Location: LOGIN_PATH });
+        response.end();
+        return;
+      }
+
+      let contentHtml;
+      try {
+        contentHtml = await composePage.submit(request, user);
+      } catch (error) {
+        sendText(response, error.statusCode ?? 500, `${error.message}\n`);
+        return;
+      }
+      sendHtml(response, layout.renderPage(request, contentHtml, { title: '发帖' }));
+      return;
+    }
+
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      sendText(response, 405, 'method not allowed\n', { Allow: 'GET, POST' });
+      return;
+    }
+
+    const html = layout.renderPage(request, composePage.formHtml(), { title: '发帖' });
+    sendHtml(response, request.method === 'HEAD' ? undefined : html);
+  }
 
   return http.createServer((request, response) => {
     let pathname;
@@ -57,13 +103,13 @@ export function createWebServer({
     }
 
     const isRegisterPage = pathname === REGISTER_PATH;
+    const isComposePage = pathname === '/compose';
     const route = routes[pathname];
-    if (!route && !isRegisterPage) {
+    if (!route && !isRegisterPage && !isComposePage) {
       const html = layout.renderPage(request, notFoundContent(pathname), {
         title: '页面未找到',
       });
-      response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-      response.end(html);
+      sendHtml(response, html, 404);
       return;
     }
 
@@ -84,6 +130,15 @@ export function createWebServer({
       }
     }
 
+    if (isComposePage) {
+      handleCompose(request, response).catch((error) => {
+        if (!response.headersSent) {
+          sendText(response, 500, `${error.message}\n`);
+        }
+      });
+      return;
+    }
+
     if (request.method === 'POST' && isRegisterPage) {
       registerPage.handlePost(request, response, { layout }).catch(() => {
         if (!response.headersSent) sendText(response, 500, 'internal error\n');
@@ -101,8 +156,7 @@ export function createWebServer({
     const content = isRegisterPage ? registerPage.renderForm() : route.content;
     const title = isRegisterPage ? REGISTER_TITLE : route.title;
     const html = layout.renderPage(request, content, { title });
-    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    response.end(request.method === 'HEAD' ? undefined : html);
+    sendHtml(response, request.method === 'HEAD' ? undefined : html);
   });
 }
 
@@ -116,6 +170,7 @@ function formatListenUrl(host, port) {
  * FP-003 默认注入内存 store 的会话访问控制（生产组装）。
  * FP-006 默认 Mock 经 createSessionOnLogin 桥接会话存储：注册成功下发的
  * 凭据即被识别，302 时间线直接呈现已登录导航。
+ * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
@@ -124,7 +179,12 @@ export async function startServer(config = loadConfig()) {
   const registerService = createMockRegisterService({
     createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
   });
-  const server = createWebServer({ sessionAccess, registerService });
+  const postService = createMockPostService();
+  const server = createWebServer({
+    sessionAccess,
+    registerService,
+    createPost: postService.createPost,
+  });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.host, () => {
