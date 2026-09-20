@@ -43,6 +43,22 @@ getFolloweeIds / createSession / getSession / destroySession`；错误类型
 python -m storage.seed social.db
 ```
 
+## FP-011 关注关系规则
+
+关注服务层（消费 FP-001 存储，仅依赖 §3.2 契约形状，可换内存模拟）：
+
+```python
+from services import FollowService, FollowError, SelfFollowNotAllowedError, FolloweeNotFoundError
+from storage import DataStore
+
+svc = FollowService(DataStore("data/social.db"))
+svc.follow(1, 2)        # 单向边 1→2：无需确认、不自动反向；重复关注幂等
+svc.getFollowees(1)     # → [2, ...] 被关注者 id 集合（时间线聚合 / 页面已关注态数据来源）
+```
+
+错误语义：自关注抛 `SelfFollowNotAllowedError`（「不可关注自己」）；被关注者不存在抛
+`FolloweeNotFoundError`（「用户不存在」）；两者均为 `FollowError` 子类。
+
 ## 开发与测试
 
 ```bash
