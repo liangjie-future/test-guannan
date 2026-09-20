@@ -1,0 +1,42 @@
+function placeholderContent(pageTitle, owner) {
+  return `<section>
+  <h1>${pageTitle}</h1>
+  <p>本页面为 FP-004 布局骨架占位：页面本体由 ${owner} 实现，并以内容区挂载进统一布局（联调对齐）。</p>
+</section>`;
+}
+
+export const routes = {
+  '/': {
+    title: '页面骨架演示页',
+    content: `<section>
+  <h1>页面骨架演示页</h1>
+  <p>本页面用于验证 FP-004 统一布局装配：页头导航 + 内容区 + 页脚。</p>
+  <p>五个导航入口：注册 / 登录 / 用户列表 / 发帖 / 时间线，均以内容区挂载进本布局。</p>
+  <p>导航登录态由 currentUser 注入点提供（FP-003 会话管理联调；未合入时默认未登录）。</p>
+</section>`,
+  },
+  '/register': {
+    title: '注册',
+    content: placeholderContent('注册', 'FP-006 注册页'),
+  },
+  '/login': {
+    title: '登录',
+    content: placeholderContent('登录', 'FP-008 登录页'),
+  },
+  '/users': {
+    title: '用户列表',
+    content: placeholderContent('用户列表', 'FP-010 用户列表'),
+  },
+  '/compose': {
+    title: '发帖',
+    content: placeholderContent('发帖', 'FP-012 发帖'),
+  },
+  '/timeline': {
+    title: '时间线',
+    content: placeholderContent('时间线', 'FP-014 时间线'),
+  },
+  '/logout': {
+    title: '退出',
+    content: placeholderContent('退出', 'FP-003 logout / FP-008 退出入口'),
+  },
+};
