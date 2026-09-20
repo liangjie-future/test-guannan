@@ -23,10 +23,8 @@ export const routes = {
     title: '用户列表',
     content: placeholderContent('用户列表', 'FP-010 用户列表'),
   },
-  '/compose': {
-    title: '发帖',
-    content: placeholderContent('发帖', 'FP-012 发帖'),
-  },
+  // '/compose' 由 FP-012 发帖界面实装（src/compose.js：GET 表单 / POST 提交），
+  // 不在静态占位表内，由 src/server.js 单独分发。
   '/timeline': {
     title: '时间线',
     content: placeholderContent('时间线', 'FP-014 时间线'),

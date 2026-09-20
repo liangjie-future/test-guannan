@@ -37,12 +37,11 @@ test('S1: 演示页 / 返回统一布局且五入口可达', async () => {
   });
 });
 
-test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页（/register 已由 FP-006 真实页面替代）', async () => {
+test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页（/register、/compose 已由真实页面替代）', async () => {
   await withServer(anonymousUser, async (base) => {
     const owners = {
       '/login': 'FP-008',
       '/users': 'FP-010',
-      '/compose': 'FP-012',
       '/timeline': 'FP-014',
       '/logout': 'FP-003',
     };
@@ -61,6 +60,16 @@ test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页�
     const registerHtml = await register.text();
     assert.ok(registerHtml.includes('name="username"'), '/register 应为真实注册表单');
     assert.ok(!registerHtml.includes('布局骨架占位'), '/register 不再是占位页');
+
+    const compose = await fetch(`${base}/compose`);
+    assert.equal(compose.status, 200);
+    const composeHtml = await compose.text();
+    assert.match(composeHtml, /class="site-header"/, '/compose 应含页头导航');
+    assert.match(composeHtml, /class="site-footer"/, '/compose 应含页脚');
+    assert.ok(
+      composeHtml.includes('data-testid="compose-form"'),
+      '/compose 应为 FP-012 发帖实页（详见 tests/compose.test.js）',
+    );
   });
 });
 
