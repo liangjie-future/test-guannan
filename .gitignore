@@ -1,6 +1,19 @@
+# 运行时产物（FP-005 运行载体）
+data/
+.env
+.run.pid
+.run.log
+*.log
+
+# 依赖（当前零依赖，保留以防后续引入）
+node_modules/
+
+# Python（FP-001 存储层）
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# SQLite 数据文件（FP-001，建议置于 DATA_DIR）
 social.db
 *.db
 *.db-wal

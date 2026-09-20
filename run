@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+#
+# FP-005 单机部署启动入口：start / stop / restart / status / config
+# 运行配置仅 HOST / PORT / DATA_DIR（.env 白名单加载，环境变量优先）。
+#
+set -euo pipefail
+
+APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$APP_ROOT"
+
+ENV_FILE="${RUN_ENV_FILE:-$APP_ROOT/.env}"
+PID_FILE="${RUN_PID_FILE:-$APP_ROOT/.run.pid}"
+LOG_FILE="${RUN_LOG_FILE:-$APP_ROOT/.run.log}"
+WAIT_TIMEOUT="${RUN_WAIT_TIMEOUT:-15}"
+
+DEFAULT_HOST=127.0.0.1
+DEFAULT_PORT=3000
+DEFAULT_DATA_DIR="$APP_ROOT/data"
+
+usage() {
+  cat <<'EOF'
+用法: run <命令>
+
+命令:
+  start [--foreground]  启动应用（默认守护模式；--foreground 前台运行，适配容器/调试）
+  stop                  停止应用（幂等；超时未退出则 SIGKILL）
+  restart               重启（stop + start）
+  status                查看运行状态（退出码 0=运行中, 3=未运行）
+  config                打印生效配置（恰 HOST / PORT / DATA_DIR 三项）
+
+应用配置（环境变量或 .env，二选一或混用，环境变量优先）:
+  HOST      监听地址，默认 127.0.0.1（容器/云机对外访问可用 0.0.0.0）
+  PORT      监听端口，默认 3000
+  DATA_DIR  数据目录，默认 <仓库根>/data（FP-001 持久化使用）
+
+脚本内部变量（非应用配置）: RUN_ENV_FILE / RUN_PID_FILE / RUN_LOG_FILE / RUN_WAIT_TIMEOUT
+EOF
+}
+
+# 仅接受 HOST / PORT / DATA_DIR 三个键（白名单），未知键一律忽略；
+# 已存在的环境变量优先于 .env 中的同名值。
+load_env_file() {
+  [ -f "$ENV_FILE" ] || return 0
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in '' | '#'*) continue ;; esac
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    case "$key" in
+      HOST | PORT | DATA_DIR)
+        if [ -z "${!key:-}" ]; then
+          export "$key=$value"
+        fi
+        ;;
+    esac
+  done < "$ENV_FILE"
+}
+
+effective_host() { echo "${HOST:-$DEFAULT_HOST}"; }
+effective_port() { echo "${PORT:-$DEFAULT_PORT}"; }
+effective_data_dir() {
+  local dir="${DATA_DIR:-./data}"
+  case "$dir" in
+    /*) echo "$dir" ;;
+    *) echo "$APP_ROOT/${dir#./}" ;;
+  esac
+}
+
+# 探活地址：0.0.0.0/:: 改打 127.0.0.1；IPv6 字面量加方括号
+http_base() {
+  local host probe
+  host="$(effective_host)"
+  case "$host" in
+    0.0.0.0 | :: | '') probe=127.0.0.1 ;;
+    *) probe="$host" ;;
+  esac
+  case "$probe" in
+    *:*) echo "http://[$probe]:$(effective_port)" ;;
+    *) echo "http://$probe:$(effective_port)" ;;
+  esac
+}
+
+app_pid() {
+  if [ -f "$PID_FILE" ]; then
+    cat "$PID_FILE" 2>/dev/null || true
+  fi
+}
+
+# 判断进程是否已消亡（含僵尸态——容器内 PID 1 可能不回收孤儿进程，
+# kill -0 对僵尸仍返回成功，需结合 /proc 状态判断）
+process_gone() {
+  local pid="$1" state
+  kill -0 "$pid" 2>/dev/null || return 0
+  if [ -r "/proc/$pid/stat" ]; then
+    state="$(sed 's/.*) //' "/proc/$pid/stat" | awk '{print $1}')"
+    [ "$state" = "Z" ] && return 0
+  fi
+  return 1
+}
+
+is_running() {
+  local pid
+  pid="$(app_pid)"
+  [ -n "$pid" ] && ! process_gone "$pid"
+}
+
+require_tools() {
+  command -v node >/dev/null 2>&1 || {
+    echo "错误: 未找到 node（需要 Node.js >= 18）" >&2
+    exit 1
+  }
+  command -v curl >/dev/null 2>&1 || {
+    echo "错误: 未找到 curl（守护模式启动探活需要）" >&2
+    exit 1
+  }
+}
+
+wait_until_up() {
+  local url deadline
+  url="$(http_base)/"
+  deadline=$(( $(date +%s) + WAIT_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.3
+  done
+  return 1
+}
+
+cmd_config() {
+  printf 'HOST=%s\nPORT=%s\nDATA_DIR=%s\n' \
+    "$(effective_host)" "$(effective_port)" "$(effective_data_dir)"
+}
+
+cmd_start() {
+  if is_running; then
+    echo "已在运行 (pid $(app_pid)): $(http_base)/"
+    return 0
+  fi
+  require_tools
+  if [ "${1:-}" = "--foreground" ]; then
+    exec node src/server.js
+  fi
+  if [ $# -gt 0 ]; then
+    echo "错误: 未知参数 $1（start 仅接受 --foreground）" >&2
+    exit 1
+  fi
+  if [ "$(effective_port)" = "0" ]; then
+    echo "错误: PORT=0（临时端口）仅支持 --foreground 前台模式" >&2
+    exit 1
+  fi
+
+  nohup node src/server.js >>"$LOG_FILE" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$PID_FILE"
+  if wait_until_up; then
+    echo "已启动 (pid $pid): $(http_base)/  (日志: $LOG_FILE)"
+  else
+    echo "错误: 服务在 ${WAIT_TIMEOUT}s 内未就绪，日志见 $LOG_FILE" >&2
+    kill "$pid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+}
+
+cmd_stop() {
+  local pid deadline
+  pid="$(app_pid)"
+  if [ -z "$pid" ]; then
+    echo "未在运行"
+    return 0
+  fi
+  if process_gone "$pid"; then
+    echo "发现陈旧 PID 文件，已清理"
+    rm -f "$PID_FILE"
+    return 0
+  fi
+  kill "$pid"
+  deadline=$(( $(date +%s) + WAIT_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if process_gone "$pid"; then
+      rm -f "$PID_FILE"
+      echo "已停止 (pid $pid)"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "超时未退出，强制杀死 (pid $pid)" >&2
+  kill -KILL "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  echo "已停止 (pid $pid, SIGKILL)"
+}
+
+cmd_status() {
+  if is_running; then
+    echo "running (运行中, pid $(app_pid)): $(http_base)/"
+    return 0
+  fi
+  echo "not running (未运行)"
+  return 3
+}
+
+cmd_restart() {
+  cmd_stop
+  cmd_start
+}
+
+load_env_file
+
+command="${1:-}"
+if [ $# -gt 0 ]; then shift; fi
+case "$command" in
+  start) cmd_start "$@" ;;
+  stop) cmd_stop ;;
+  restart) cmd_restart ;;
+  status) cmd_status ;;
+  config) cmd_config ;;
+  -h | --help | help | '') usage ;;
+  *)
+    echo "错误: 未知命令 $command" >&2
+    usage
+    ;;
+esac

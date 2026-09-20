@@ -1,12 +1,14 @@
 {
   "name": "twitter-social-platform",
+  "version": "0.1.0",
   "private": true,
+  "description": "twitter 类社交平台 Step 1（单机、单租户、单环境部署运行载体）",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }
