@@ -15,6 +15,7 @@ from services.posting import (
     STATUS_OK,
     PostService,
 )
+from services.timeline import TimelineService
 
 __all__ = [
     "FollowError",
@@ -28,4 +29,5 @@ __all__ = [
     "STATUS_ERROR",
     "STATUS_OK",
     "PostService",
+    "TimelineService",
 ]
