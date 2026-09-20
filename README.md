@@ -96,6 +96,28 @@ service.getTimeline(user_id)
 排序按真实时间瞬间（ISO 8601 解析，naive 视为 UTC），不依赖存储返回顺序；作者名
 由本任务经 `getUserById` 一并补齐（`author_username`），页面（FP-014）无需逐帖回查。
 
+## FP-007 注册规则与建号
+
+注册业务核心服务（`services.RegistrationService`）：校验用户名唯一、密码 ≥6 位，
+通过后建号（用户名 + 密码散列 + 盐 + 创建时间，全链路无明文）并进入登录态；
+失败不建号、不建会话，并发 / 重复提交由用户名唯一约束兜底（仅一个账号）：
+
+```python
+from services import RegistrationService
+from storage import DataStore
+
+service = RegistrationService(DataStore("data/social.db"))
+result = service.register("newuser", "secret123")
+# 成功：{"status": "OK", "user": {id, username}, "session_token": <登录态凭据>}
+# 失败：{"status": "ERROR", "reason": "USERNAME_TAKEN" | "PASSWORD_TOO_SHORT"}
+```
+
+校验顺序：用户名占用 → 密码长度 → 散列（FP-002 `hashPassword`，慢散列仅
+成功路径触达）→ 建号（FP-001）→ 建会话（FP-003 契约 `createSessionOnLogin`，
+默认以 `store.createSession` 派生，可注入访问控制层自有工厂）。注册页输入
+收集与展示（FP-006）消费本契约。验证用种子（已占用 `alice`、合法
+`newuser`/`secret123`、过短 `12345`）见 `tests/test_registration.py`。)
+
 ## FP-002 密码加密存储
 
 单向慢散列 + 独立随机盐的纯能力接口（Python 标准库，零第三方依赖），
