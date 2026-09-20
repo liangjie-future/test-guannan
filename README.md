@@ -124,6 +124,27 @@ getUserById`）注入；默认内存实现含种子：alice（id=1）、有效�
 过期会话 `seed-token-expired`。`./run start` 生产入口默认启用访问控制
 （受限页匿名 302 `/login`，`GET /logout` 销毁会话并清除 Cookie）。
 
+## FP-009 登录校验
+
+登录业务核心服务（`services.LoginService`，消费 FP-001 存储 + FP-002 散列校验，
+会话建立走注入式 `createSessionOnLogin`）：
+
+```python
+from services import LoginService
+from storage import DataStore
+
+svc = LoginService(DataStore("data/social.db"))
+svc.login("bob", "right-password")
+# 成功：{"status": "OK", "user": {"id", "username"}, "session_token": <登录态凭据>}
+# 失败：{"status": "ERROR", "message": "用户名或密码错误"}（统一提示，不建立会话）
+```
+
+用户名不存在与密码错误响应完全一致（防账号枚举）：失败路径同样执行一次真实
+PBKDF2 比对（诱饵凭证，时序均衡），且任何失败都不产生会话（sessions 表不增长）。
+会话建立默认适配 FP-001 `createSession` 原语（FP-003 实现产在 Node，跨语言
+按契约形状适配，联调时替换注入即可）；验证用种子用户 bob / 明文
+`right-password`（测试内经 `hashPassword` 建号，明文不入库）。
+
 ## 开发与测试
 
 ```bash
