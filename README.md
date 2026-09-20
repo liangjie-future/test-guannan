@@ -232,6 +232,25 @@ const server = createWebServer({ registerService }); // GET/POST /register 即�
 与建号由 FP-007 `RegistrationService` 承担（跨语言联调时按契约形状替换注入），
 验证用例见 `tests/register-page.test.js`。
 
+## FP-008 登录页与退出入口
+
+Web 层登录页与退出回路（`src/login-page.js` 表单渲染 + `src/server.js` POST
+`/login` 提交处理）：页面只收集输入并调用注入式 login 服务（§3.2 契约
+`{status: OK, user, session_token}` / `{status: ERROR, message}`）；成功经
+FP-003 `createSessionOnLogin` 建会话、下发 HttpOnly Cookie 并 302 `/timeline`，
+失败 200 回渲染统一错误提示（不区分用户名 / 密码哪项错）；导航「退出」入口
+已登录可见，点击即销毁会话回登录页：
+
+```bash
+./run start
+# 浏览器打开 http://127.0.0.1:3000/login → 输入 bob / right-password（§6 Mock 种子）
+# → 跳转时间线（已登录导航态）→ 点「退出」→ 回未登录态
+```
+
+FP-009 产在 Python，Node Web 进程按契约以 `src/login-mock.js` 的可注入 Mock
+替代（bob / `right-password` OK 态、任意错误组合统一失败态）；真实桥接属
+集成点（`createWebServer({ login })` 替换注入即可，页面 / 流程零改动）。
+
 ## 开发与测试
 
 ```bash

@@ -16,7 +16,8 @@ function isoTime(ms) {
   return new Date(ms).toISOString();
 }
 
-function seedUsers(nowMs) {
+/** 种子用户表（alice）；导出供组装点扩展（如 FP-008 增补登录替身 bob）。 */
+export function seedUsers(nowMs) {
   const createdAt = isoTime(nowMs);
   return new Map([
     [1, {

@@ -37,10 +37,9 @@ test('S1: 演示页 / 返回统一布局且五入口可达', async () => {
   });
 });
 
-test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页（/register、/compose 已由真实页面替代）', async () => {
+test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页（/register 已由 FP-006、/compose 已由 FP-012、/login 已由 FP-008 真实页面替代）', async () => {
   await withServer(anonymousUser, async (base) => {
     const owners = {
-      '/login': 'FP-008',
       '/users': 'FP-010',
       '/timeline': 'FP-014',
       '/logout': 'FP-003',
@@ -70,6 +69,12 @@ test('S2: 剩余占位入口与 /logout 路由均以统一布局返回占位页�
       composeHtml.includes('data-testid="compose-form"'),
       '/compose 应为 FP-012 发帖实页（详见 tests/compose.test.js）',
     );
+
+    const loginPage = await fetch(`${base}/login`);
+    assert.equal(loginPage.status, 200);
+    const loginHtml = await loginPage.text();
+    assert.ok(loginHtml.includes('name="username"'), '/login 应为真实登录表单');
+    assert.ok(!loginHtml.includes('布局骨架占位'), '/login 不再是占位页');
   });
 });
 
