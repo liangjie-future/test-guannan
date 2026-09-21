@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createLayout } from './layout.js';
-import { routes } from './routes.js';
+import { createRoutes } from './routes.js';
+import { TIMELINE_PATH } from './timeline.js';
 import { escapeHtml } from './html.js';
 import { loadConfig } from './config.js';
 import { defaultCurrentUser } from './current-user.js';
@@ -27,6 +28,7 @@ import { createUsersPage, parseFollowActionPath } from './users-page.js';
  * + FP-008 登录页与退出入口（POST /login 提交，login 服务注入式）
  * + FP-010 用户列表页（usersPage 注入即生效：GET /users 动态渲染、
  *   POST /users/<id>/follow 关注动作）。
+ * + FP-014 时间线页面（getTimeline 注入即生效，/ 已登录默认落点 → /timeline）。)
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）与关注动作挂 requireLogin 守卫、/logout 变为
@@ -34,6 +36,7 @@ import { createUsersPage, parseFollowActionPath } from './users-page.js';
  * 未注入 usersPage 时 /users 维持 FP-004 占位内容区。
  * /compose 提交一律要求登录：匿名 POST 无论何种组装均 302 登录页。
  * login 按 §3.2 契约注入（默认 §6 Mock：bob / right-password 两态）。
+ * 注入 getTimeline 时：/timeline 渲染该服务返回的帖子流（默认 §6 Mock）。
  */
 
 function notFoundContent(pathname) {
@@ -64,6 +67,7 @@ export function createWebServer({
   createPost = null,
   login = createMockLoginService(),
   usersPage = null,
+  getTimeline,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -72,14 +76,10 @@ export function createWebServer({
   const composePage = createComposePage({
     createPost: createPost ?? createMockPostService().createPost,
   });
+  const routes = createRoutes({ getTimeline });
 
-  function resolveUser(request) {
-    return sessionAccess ? sessionAccess.currentUser(request) : getCurrentUser(request);
-  }
-
-  async function handleCompose(request, response) {
+  async function handleCompose(request, response, user) {
     if (request.method === 'POST') {
-      const user = resolveUser(request);
       if (user === null) {
         response.writeHead(302, { Location: LOGIN_PATH });
         response.end();
@@ -184,7 +184,7 @@ export function createWebServer({
       return;
     }
 
-    let viewer = null;
+    let user = sessionAccess ? null : getCurrentUser(request);
     if (sessionAccess) {
       if (pathname === '/logout') {
         const token = sessionAccess.sessionTokenFromRequest(request);
@@ -197,15 +197,18 @@ export function createWebServer({
         return;
       }
       if (RESTRICTED_PATHS.includes(pathname)) {
-        viewer = sessionAccess.requireLogin(request, response);
-        if (viewer === null) return;
+        const guarded = sessionAccess.requireLogin(request, response);
+        if (guarded === null) return;
+        user = guarded;
+      } else {
+        user = sessionAccess.currentUser(request);
       }
     } else {
-      viewer = getCurrentUser(request);
+      user = getCurrentUser(request);
     }
 
     if (isComposePage) {
-      handleCompose(request, response).catch((error) => {
+      handleCompose(request, response, user).catch((error) => {
         if (!response.headersSent) {
           sendText(response, 500, `${error.message}\n`);
         }
@@ -232,16 +235,27 @@ export function createWebServer({
       return;
     }
 
-    let content = isRegisterPage ? registerPage.renderForm() : route.content;
+    // FP-014 默认落点：时间线即登录后首页——已登录访问 / 直达 /timeline；
+    // 未登录保持 FP-004 演示页基线（匿名入口不回归）。
+    if (pathname === '/' && user !== null) {
+      response.writeHead(302, { Location: TIMELINE_PATH });
+      response.end();
+      return;
+    }
+
+    let content = isRegisterPage
+      ? registerPage.renderForm()
+      : typeof route.render === 'function'
+        ? route.render({ request, user })
+        : route.content;
     if (usersPage && pathname === '/users') {
-      if (viewer === null) {
+      if (user === null) {
         response.writeHead(302, { Location: LOGIN_PATH });
         response.end();
         return;
       }
-      content = usersPage.renderContent({ currentUser: viewer, searchParams: url.searchParams });
+      content = usersPage.renderContent({ currentUser: user, searchParams: url.searchParams });
     }
-
     const title = isRegisterPage ? REGISTER_TITLE : route.title;
     const html = layout.renderPage(request, content, { title });
     sendHtml(response, request.method === 'HEAD' ? undefined : html);
@@ -290,6 +304,7 @@ export function webUsers() {
  * 凭据即被识别，302 时间线直接呈现已登录导航。
  * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
  * FP-010 默认注入种子内存社交 store 的用户列表页（§6 Mock 策略）。
+ * FP-014 未注入 getTimeline 时 /timeline 使用默认 §6 Mock（场景 A 种子帖子流）。)
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
