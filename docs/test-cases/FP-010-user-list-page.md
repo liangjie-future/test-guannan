@@ -41,6 +41,7 @@
 | P6 | 自关注动作（服务端兜底） | followeeId=1 → follow 收到 (1,1)；返回 notice SELF_FOLLOW_NOT_ALLOWED |
 | P7 | 不存在用户动作 | followeeId=999 → notice FOLLOWEE_NOT_FOUND |
 | P8 | notice 渲染 | searchParams notice=FOLLOW_OK&username=carol → 提示「已关注 carol」；未知 notice 码 → 不渲染提示（无反射） |
+| P8b | notice 原型链键 | notice=__proto__/constructor/valueOf/toString → 不抛错、不渲染提示（Object.hasOwn 守卫，防继承键命中） |
 | P9 | username XSS | 渲染含 `<script>` 的用户名 / notice username → 被转义 |
 | P10 | 空列表 | listUsers 返回 [] → 渲染空态文案不崩溃 |
 
@@ -59,6 +60,7 @@
 | H9 | 非数字 id `/users/abc/follow` POST | 404（统一布局） |
 | H10 | currentUser 替身（无 sessionAccess，§6 形态） | 注入固定 alice 的 getCurrentUser + usersPage → 200 渲染 3 用户 |
 | H11 | 未注入 usersPage 的 FP-004 基线 | `/users` 仍返回占位内容（既有用例零破坏） |
+| H12 | 已登录 GET `/users?notice=__proto__` | 200 且无 `data-notice`（未知码忽略不变量，防 500/垃圾渲染） |
 
 ## 五、既有回归
 

@@ -197,6 +197,21 @@ test('H10: currentUser 替身（无 sessionAccess，§6 形态）驱动渲染 3 
   );
 });
 
+test('H12: 已登录 GET /users?notice=__proto__ → 200 且不渲染 notice（未知码忽略不变量）', async () => {
+  const fixture = createFixture();
+  const { token } = loginAlice(fixture.sessionAccess);
+  await withServer({ sessionAccess: fixture.sessionAccess, usersPage: fixture.usersPage }, async (base) => {
+    const res = await fetchNoRedirect(`${base}/users?notice=__proto__`, {
+      headers: { cookie: `session_token=${token}` },
+    });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(!html.includes('data-notice='));
+    assert.ok(!html.includes('internal server error'));
+    assert.ok(html.includes('alice'), '页面正常渲染用户列表');
+  });
+});
+
 test('H11: 未注入 usersPage 的 FP-004 基线 /users 仍为占位内容', async () => {
   const { sessionAccess } = createFixture();
   const { token } = loginAlice(sessionAccess);
