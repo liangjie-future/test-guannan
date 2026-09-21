@@ -31,7 +31,7 @@ export function parseFollowActionPath(pathname) {
 function renderNotice(searchParams) {
   if (!searchParams) return '';
   const code = searchParams.get('notice');
-  const toText = NOTICE_TEXT[code];
+  const toText = Object.hasOwn(NOTICE_TEXT, code) ? NOTICE_TEXT[code] : null;
   if (!toText) return '';
   return `\n  <p class="page-notice" data-notice="${escapeHtml(code)}">${escapeHtml(toText(searchParams))}</p>`;
 }

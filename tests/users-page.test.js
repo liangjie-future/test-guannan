@@ -123,6 +123,18 @@ test('P8: notice 渲染已知码，未知码忽略（无反射面）', () => {
   assert.ok(!unknown.includes('<script>'));
 });
 
+test('P8b: 原型链键（__proto__/constructor/valueOf/toString）不作 notice 码：不抛错、不渲染提示', () => {
+  const { page } = createFixture();
+  for (const code of ['__proto__', 'constructor', 'valueOf', 'toString']) {
+    const html = page.renderContent({
+      currentUser: alice,
+      searchParams: new URLSearchParams(`notice=${code}`),
+    });
+    assert.ok(!html.includes('data-notice='), `${code} 不应渲染 notice`);
+    assert.ok(!html.includes('[object'), `${code} 不应渲染原型成员产物`);
+  }
+});
+
 test('P9: 用户名与 notice username 均被转义（XSS）', () => {
   const { page } = createFixture({
     users: [{ id: 2, username: '<script>bob()</script>', created_at: '2026-01-02T00:00:00.000Z' }],
