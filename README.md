@@ -355,6 +355,38 @@ createWebServer({ createComment: store.createComment });       // 端口可注�
 回复 / 嵌套 / 编辑 / 删除路径（上游 D7）。验证用例（验收 1–5 对应 A 组）
 见 `tests/comment-action.test.js`。
 
+## FP-006 时间线内嵌受限互动区
+
+互动区渲染（`src/interaction-area.js`，挂载进 FP-014 时间线每帖 `timeline-item`
+下方）：点赞表单（`POST /posts/<id>/like`，`data-like-state="liked|not-liked"`
+由 `viewer_liked` 驱动 toggle 态）、可见点赞集合（用户名列表）、仅可见计数
+（赞 / 评各一计数位）、评论正序列表（用户名 + 内容 + 时间，按服务返回顺序
+原样渲染）、评论表单（`POST /posts/<id>/comment`，textarea `name="content"`）
+与实时字数提示「当前 / 280」（码点口径，风格对齐 compose.js 计数器）：
+
+```js
+import { createTimelinePage } from './src/timeline.js';
+import { createMockGetVisibleInteractions } from './src/interaction-area.js';
+
+const page = createTimelinePage({
+  getTimeline,                                                    // FP-015 契约
+  getVisibleInteractions: createMockGetVisibleInteractions(),     // §3.2-1 载荷契约（§6 默认 Mock）
+});
+page.render({ id, username }, { searchParams });  // searchParams 携 §3.2-3 失败回显参数
+```
+
+- 渲染层只消费过滤后载荷，不过滤、不排序（可见性与正序由 FP-004 服务保证，
+  上游 D1/D2/D8）；好友与非好友帖主走同一渲染函数，产物结构同构；
+- 空态只给 0 赞 0 评论：无占位、无「部分已隐藏」类泄露提示；全量正序、不分页；
+- 失败回显（与 FP-008 冻结协议）：`comment_failed_post` + `comment_error ∈
+  {EMPTY_CONTENT, TOO_LONG}` 时目标帖互动区渲染失败文案（口径同发帖链路，
+  N＝去首尾空白后码点数）并把 `comment_text` 原文回显输入框，其余帖不受影响；
+- §6 Mock：`createMockGetVisibleInteractions()` 以 FP-005 内存 store 为判定
+  内核，输出上补 `username` / `viewer_liked`（数据组装方职责的默认实现），
+  种子与 FP-004/FP-005 同构（alice 查 P1 → carol 可见 / dave 隐藏 / 帖主自
+  互动排除，P2 备已赞态、P3/P4 空态），可注入替换联调收口。
+  验证用例见 `tests/timeline-interactions.test.js`。
+
 ## 开发与测试
 
 ```bash

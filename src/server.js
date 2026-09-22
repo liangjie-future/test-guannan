@@ -76,6 +76,7 @@ export function createWebServer({
   usersPage = null,
   likeStore = null,
   getTimeline,
+  getVisibleInteractions = null,
   createComment = null,
 } = {}) {
   const layout = createLayout({
@@ -88,7 +89,7 @@ export function createWebServer({
   const commentAction = createCommentAction({
     createComment: createComment ?? createMemoryInteractionStore().createComment,
   });
-  const routes = createRoutes({ getTimeline });
+  const routes = createRoutes({ getTimeline, getVisibleInteractions });
   const likeAction = likeStore === null ? null : createLikeActionService({ store: likeStore });
 
   async function handleCompose(request, response, user) {
@@ -295,7 +296,7 @@ export function createWebServer({
     let content = isRegisterPage
       ? registerPage.renderForm()
       : typeof route.render === 'function'
-        ? route.render({ request, user })
+        ? route.render({ request, user, url })
         : route.content;
     if (usersPage && pathname === '/users') {
       if (user === null) {

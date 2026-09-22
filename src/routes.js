@@ -16,8 +16,8 @@ function placeholderContent(pageTitle, owner) {
  * FP-006 起 /register、FP-012 起 /compose 均不入本表：
  * 分别由 server.js 经 register-page / compose 模块分发实页。
  */
-export function createRoutes({ getTimeline } = {}) {
-  const timelinePage = createTimelinePage({ getTimeline });
+export function createRoutes({ getTimeline, getVisibleInteractions } = {}) {
+  const timelinePage = createTimelinePage({ getTimeline, getVisibleInteractions });
 
   return {
     '/': {
@@ -41,8 +41,10 @@ export function createRoutes({ getTimeline } = {}) {
     // 不在静态占位表内，由 src/server.js 单独分发。
     '/timeline': {
       title: '时间线',
-      render: ({ user }) =>
-        user ? timelinePage.render(user) : timelinePage.renderAnonymous(),
+      render: ({ user, url }) =>
+        user
+          ? timelinePage.render(user, { searchParams: url ? url.searchParams : null })
+          : timelinePage.renderAnonymous(),
     },
     '/logout': {
       title: '退出',
