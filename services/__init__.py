@@ -1,5 +1,13 @@
 """services: 业务规则服务层."""
 
+from services.engagement import (
+    MAX_COMMENT_LENGTH,
+    REASON_EMPTY_CONTENT,
+    REASON_POST_NOT_FOUND,
+    REASON_TOO_LONG,
+    REASON_USER_NOT_FOUND,
+    EngagementService,
+)
 from services.follow import (
     FollowError,
     FolloweeNotFoundError,
@@ -25,6 +33,12 @@ from services.registration import (
 from services.timeline import TimelineService
 
 __all__ = [
+    "EngagementService",
+    "MAX_COMMENT_LENGTH",
+    "REASON_EMPTY_CONTENT",
+    "REASON_POST_NOT_FOUND",
+    "REASON_TOO_LONG",
+    "REASON_USER_NOT_FOUND",
     "FollowError",
     "FolloweeNotFoundError",
     "FollowService",
