@@ -212,6 +212,27 @@ class DataStore:
         ).fetchall()
         return [row[0] for row in rows]
 
+    # ------------------------------------------ 好友 / 共同好友（FP-003 推导）
+
+    def friendIds(self, user_id):
+        """好友集合：与 user_id 双向互关的用户 id（set，次序无意义）.
+
+        单向边不算好友；按 follows 当前边实时计算（无快照），纯读不写库。
+        """
+        rows = self._conn.execute(
+            "SELECT f1.followee_id FROM follows f1"
+            " JOIN follows f2"
+            "   ON f2.follower_id = f1.followee_id"
+            "  AND f2.followee_id = f1.follower_id"
+            " WHERE f1.follower_id = ?",
+            (user_id,),
+        ).fetchall()
+        return {row[0] for row in rows}
+
+    def mutualFriendIds(self, v, a):
+        """共同好友集合：friendIds(v) ∩ friendIds(a)（set，实时按当前边计算）."""
+        return self.friendIds(v) & self.friendIds(a)
+
     # ------------------------------------------- likes / comments（FP-001 / FP-002 / FP-016）
 
     def likePost(self, post_id, user_id):
@@ -246,6 +267,7 @@ class DataStore:
             ).fetchall()
             likes.extend(dict(row) for row in rows)
         return likes
+
 
     def addLike(self, post_id, user_id):
         """点赞（幂等）：已点赞则不重复插入；返回是否新建（内容规则归 FP-016 服务层）."""
