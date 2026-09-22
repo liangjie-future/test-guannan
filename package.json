@@ -9,6 +9,11 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "playwright test",
+    "test:python": "python3 -m venv .venv && .venv/bin/python -m pip install --disable-pip-version-check --quiet -r requirements-dev.txt && PATH=\"$PWD/.venv/bin:$PATH\" python3 -m pytest -q"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
   }
 }

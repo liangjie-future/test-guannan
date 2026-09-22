@@ -51,10 +51,25 @@ test('L1: 未登录 GET /login 呈现两输入 + 提交控件，导航为未登�
     assert.match(html, /<input[^>]*type="text"[^>]*name="username"/);
     assert.match(html, /<input[^>]*type="password"[^>]*name="password"/);
     assert.match(html, /<button[^>]*type="submit"/);
+    assert.match(html, /<button[^>]*type="button"[^>]*aria-pressed="false"[^>]*aria-controls="login-password">显示密码<\/button>/);
     assert.ok(html.includes('data-login-state="anonymous"'));
     assert.ok(html.includes('href="/login"'));
     assert.ok(html.includes('href="/register"'));
     assert.ok(!html.includes('href="/logout"'), '未登录不可见退出入口');
+  });
+});
+
+test('L1a: 登录路由每次渲染均为默认隐藏，不影响注册页', async () => {
+  const { server } = createStack();
+  await withServer(server, async (base) => {
+    const first = await (await fetch(`${base}/login`)).text();
+    const second = await (await fetch(`${base}/login`)).text();
+    assert.equal((first.match(/aria-pressed="false"/g) ?? []).length, 1);
+    assert.equal((second.match(/aria-pressed="false"/g) ?? []).length, 1);
+
+    const register = await (await fetch(`${base}/register`)).text();
+    assert.ok(!register.includes('login-password'));
+    assert.ok(!register.includes('显示密码'));
   });
 });
 
@@ -103,6 +118,10 @@ test('L4: 错误密码 → 200 统一错误提示，不下发 Cookie、不建会
     const html = await res.text();
     assert.ok(html.includes('data-testid="login-error"'));
     assert.ok(html.includes(UNIFIED_LOGIN_ERROR_MESSAGE));
+    assert.match(html, /type="password"[^>]*id="login-password"/);
+    assert.match(html, /aria-pressed="false"[^>]*aria-controls="login-password">显示密码/);
+    assert.ok(!html.includes('value="bob"'), '失败态不应回填用户名');
+    assert.ok(!html.includes('value="wrong-password"'), '失败态不应回填密码');
     assert.match(html, /<form[^>]*method="post"/, '失败后表单保留可重试');
     assert.equal(res.headers.get('set-cookie'), null);
     assert.equal(store.getSession('seed-token-1')?.user_id, 1, '种子会话不受影响');

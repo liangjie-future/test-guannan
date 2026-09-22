@@ -23,9 +23,32 @@ ${errorBlock}  <form method="post" action="/login" class="login-form" data-testi
     <div class="form-field">
       <label for="login-password">密码</label>
       <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+      <button type="button" aria-pressed="false" aria-controls="login-password">显示密码</button>
     </div>
     <button type="submit" data-testid="login-submit">登录</button>
   </form>
   <p>还没有账号？<a href="/register">先注册</a></p>
-</section>`;
+</section>
+<script>
+(() => {
+  const password = document.getElementById('login-password');
+  const toggle = document.querySelector('[aria-controls="login-password"]');
+  if (!password || !toggle) return;
+
+  const setVisibility = () => {
+    const visible = password.type === 'password';
+    password.type = visible ? 'text' : 'password';
+    toggle.textContent = visible ? '隐藏密码' : '显示密码';
+    toggle.setAttribute('aria-pressed', String(visible));
+    toggle.focus();
+  };
+
+  toggle.addEventListener('click', setVisibility);
+  toggle.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+    event.preventDefault();
+    setVisibility();
+  });
+})();
+</script>`;
 }

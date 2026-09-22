@@ -12,6 +12,8 @@ node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+test-results/
 
 # SQLite 数据文件（FP-001，建议置于 DATA_DIR）
 social.db
