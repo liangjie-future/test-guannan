@@ -149,6 +149,15 @@ export function createMemoryInteractionStore({
       return entriesInPosts(commentTable, postIds, byId).map((comment) => ({ ...comment }));
     },
 
+    /**
+     * 用户目录查找（FP-009 组装层 username 补齐端口；契约形状之外的
+     * Mock 便利扩展）：返回副本或 null，不暴露内部状态。
+     */
+    getUserById(id) {
+      const user = userTable.get(id);
+      return user === undefined ? null : { ...user };
+    },
+
     /** 双向互关集合（升序副本）。 */
     friendIds,
 

@@ -70,7 +70,7 @@ function formatPostTime(iso) {
   return String(iso).replace('T', ' ').replace(/Z$/, '');
 }
 
-function renderPost(post) {
+function renderPost(post, interactionFragment = null) {
   const author = post.author_username ?? `用户#${post.author_id}`;
   const rawTime = String(post.created_at);
   return `  <li class="timeline-item" data-testid="timeline-item">
@@ -79,6 +79,7 @@ function renderPost(post) {
       <time class="post-time" datetime="${escapeHtml(rawTime)}">${escapeHtml(formatPostTime(rawTime))}</time>
     </div>
     <p class="post-content" data-testid="post-content">${escapeHtml(post.content)}</p>
+${interactionFragment ?? ''}
   </li>`;
 }
 
@@ -90,8 +91,12 @@ ${bodyHtml}
 </section>`;
 }
 
-/** 帖子流条目渲染：沿用服务返回顺序（页面不重排），空集合 → 空态提示。 */
-export function renderTimelinePosts(posts) {
+/**
+ * 帖子流条目渲染：沿用服务返回顺序（页面不重排），空集合 → 空态提示。
+ * interactionFragments（FP-009 组装层输出 Map<post_id, html>）存在时逐帖
+ * 内嵌——片段数据已服务端过滤，页面不触任何互动明细原语。
+ */
+export function renderTimelinePosts(posts, interactionFragments = null) {
   if (!posts || posts.length === 0) {
     return wrapContent(`  <div class="timeline-empty" data-testid="timeline-empty">
     <p>还没有关注任何人，时间线暂时是空的。</p>
@@ -99,19 +104,28 @@ export function renderTimelinePosts(posts) {
   </div>`);
   }
   return wrapContent(`  <ol class="timeline-list">
-${posts.map((post) => renderPost(post)).join('\n')}
+${posts
+  .map((post) => renderPost(post, interactionFragments?.get(post.id) ?? null))
+  .join('\n')}
   </ol>`);
 }
 
 /**
  * 时间线页面工厂：getTimeline 构造注入（默认 §6 Mock 场景 A）。
+ * interactionArea（可选，(viewer, posts) → Map<post_id, html>）为 FP-009
+ * 互动区组装层注入点——未注入时保持 FP-014 基线（纯帖子流）。
  * render(user) 以登录用户为查询主体；renderAnonymous() 供 FP-004 基线模式
  * （未注入 sessionAccess、无守卫）匿名直访时渲染登录引导而非空态。
  */
-export function createTimelinePage({ getTimeline = createMockGetTimeline() } = {}) {
+export function createTimelinePage({
+  getTimeline = createMockGetTimeline(),
+  interactionArea = null,
+} = {}) {
   return {
     render(user) {
-      return renderTimelinePosts(getTimeline(user.id));
+      const posts = getTimeline(user.id);
+      const fragments = interactionArea === null ? null : interactionArea(user, posts);
+      return renderTimelinePosts(posts, fragments);
     },
     renderAnonymous() {
       return wrapContent(`  <div class="timeline-anonymous">

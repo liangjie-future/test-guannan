@@ -355,6 +355,36 @@ createWebServer({ createComment: store.createComment });       // 端口可注�
 回复 / 嵌套 / 编辑 / 删除路径（上游 D7）。验证用例（验收 1–5 对应 A 组）
 见 `tests/comment-action.test.js`。
 
+## FP-009 互动服务端强制过滤与鉴权兜底
+
+安全收口层：全部互动读取与写入路径置于登录守卫之后，可见性过滤固定在
+服务端数据组装层（`src/timeline-interactions.js`）——/timeline 互动区数据
+唯一来源为注入可见性服务的 `getVisibleInteractions` 输出（FP-004 §3.2-1
+契约；组装层只在其上补齐 `username` / `viewer_liked` 渲染便利字段，不
+import 任何互动明细存取原语，「绕过过滤直取明细」由构造排除）；两个互动
+动作路由以路径模式（`/posts/<id>/like`、`/posts/<id>/comment`）前置
+`requireActionLogin`（未登录 / 会话失效一律 302 `/login` 且不产生互动记录，
+守卫先于方法检查与存储触达）。响应体红线（D8）：无被隐藏互动条目、无
+计数差（计数＝可见数）、无占位、无时序空洞——服务端兜底，不依赖前端隐藏。
+
+```js
+import { createWebServer } from './src/server.js';
+import { createMemoryInteractionStore } from './src/interaction-store.js';
+
+const store = createMemoryInteractionStore();   // §6 标准场景种子
+createWebServer({
+  interactionVisibility: store,                 // 读取过滤（注入即生效）
+  likeStore: store,                             // 写入动作（FP-007）
+  createComment: store.createComment,           // 写入动作（FP-008）
+});
+```
+
+未注入 `interactionVisibility` 时 /timeline 保持 FP-014 纯帖子流基线；
+`startServer` 生产组装默认注入同一 FP-005 内存 store（写读同一数据面）。
+终态互动区样式归 FP-006（此处仅提供 data-testid / data-count 钩子的最小
+呈现）。验证用例（验收 1–5 + 组装层单元面）见
+`tests/interaction-enforcement.test.js`。
+
 ## 开发与测试
 
 ```bash
