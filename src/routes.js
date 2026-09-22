@@ -15,9 +15,11 @@ function placeholderContent(pageTitle, owner) {
  * render({ request, user }) 动态产出内容区，否则取静态 route.content。
  * FP-006 起 /register、FP-012 起 /compose 均不入本表：
  * 分别由 server.js 经 register-page / compose 模块分发实页。
+ * FP-009 起 interactionArea（互动区组装层片段）透传时间线页面——
+ * 互动数据经可见性服务服务端过滤后内嵌。
  */
-export function createRoutes({ getTimeline } = {}) {
-  const timelinePage = createTimelinePage({ getTimeline });
+export function createRoutes({ getTimeline, interactionArea = null } = {}) {
+  const timelinePage = createTimelinePage({ getTimeline, interactionArea });
 
   return {
     '/': {

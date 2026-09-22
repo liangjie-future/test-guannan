@@ -22,6 +22,7 @@ import { createUsersPage, parseFollowActionPath } from './users-page.js';
 import { parseLikeActionPath, createLikeActionService } from './like-action.js';
 import { createCommentAction, parseCommentActionPath } from './comment-action.js';
 import { createMemoryInteractionStore } from './interaction-store.js';
+import { createTimelineInteractionArea } from './timeline-interactions.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -36,6 +37,9 @@ import { createMemoryInteractionStore } from './interaction-store.js';
  *   toggle 切换点赞 / 取消，PRG 302 /timeline）。
  * + FP-008 评论提交动作（POST /posts/<id>/comment：createComment 注入即生效，
  *   校验口径同发帖链路，失败按 §3.2-4 回显参数 PRG 回 /timeline）。
+ * + FP-009 互动强制过滤与鉴权兜底（interactionVisibility 注入即生效：
+ *   /timeline 互动区数据组装固定经可见性服务唯一过滤；两个互动动作路由
+ *   以路径模式前置 requireActionLogin——守卫先于方法检查与存储触达）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）与关注动作挂 requireLogin 守卫、/logout 变为
@@ -77,6 +81,7 @@ export function createWebServer({
   likeStore = null,
   getTimeline,
   createComment = null,
+  interactionVisibility = null,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -88,7 +93,14 @@ export function createWebServer({
   const commentAction = createCommentAction({
     createComment: createComment ?? createMemoryInteractionStore().createComment,
   });
-  const routes = createRoutes({ getTimeline });
+  // FP-009 读取强制过滤：互动区片段唯一来源＝注入可见性服务（FP-004 §3.2-1
+  // 契约，FP-005 内存 Mock 同形）的 getVisibleInteractions 输出；未注入保持
+  // FP-014 纯帖子流基线。
+  const interactionArea =
+    interactionVisibility === null
+      ? null
+      : createTimelineInteractionArea({ visibility: interactionVisibility }).renderFragments;
+  const routes = createRoutes({ getTimeline, interactionArea });
   const likeAction = likeStore === null ? null : createLikeActionService({ store: likeStore });
 
   async function handleCompose(request, response, user) {
@@ -149,7 +161,11 @@ export function createWebServer({
     sendHtml(response, html);
   }
 
-  /** 动作路由共用登录门槛：已登录放行 viewer；未登录写 302 /login 并返回 null。 */
+  /**
+   * 动作路由共用登录门槛（FP-009 守卫纳管面：关注 / 点赞 / 评论）：
+   * 已登录放行 viewer；未登录 / 会话失效写 302 /login 并返回 null——
+   * 调用方据此先于方法检查与存储触达终止，不产生互动记录。
+   */
   function requireActionLogin(request, response) {
     const viewer = sessionAccess
       ? sessionAccess.requireLogin(request, response)
@@ -355,6 +371,8 @@ export function webUsers() {
  * FP-010 默认注入种子内存社交 store 的用户列表页（§6 Mock 策略）。
  * FP-014 未注入 getTimeline 时 /timeline 使用默认 §6 Mock（场景 A 种子帖子流）。)
  * FP-007 默认注入 FP-005 内存互动 store 的点赞存取（likeStore，§3.2 契约）。
+ * FP-009 默认注入同一 store 为可见性服务（interactionVisibility）与评论写入
+ * （createComment）：/timeline 互动区经 getVisibleInteractions 服务端过滤。
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
@@ -372,6 +390,8 @@ export async function startServer(config = loadConfig()) {
     getFolloweeIds: followService.getFolloweeIds,
   });
   // FP-007 点赞存取：FP-005 内存实现按 §3.2 契约提供（Python 桥接属集成点）。
+  // FP-009 收口：点赞 / 评论写入与可见性服务共享同一互动 store——
+  // 写入与过滤读取落在同一数据面（此前 comment 动作回落独立默认实例）。
   const interactionStore = createMemoryInteractionStore();
   const server = createWebServer({
     sessionAccess,
@@ -379,6 +399,8 @@ export async function startServer(config = loadConfig()) {
     createPost: postService.createPost,
     usersPage,
     likeStore: interactionStore,
+    createComment: interactionStore.createComment,
+    interactionVisibility: interactionStore,
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
