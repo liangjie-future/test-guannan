@@ -35,6 +35,23 @@ CREATE TABLE IF NOT EXISTS follows (
 CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);
 CREATE INDEX IF NOT EXISTS idx_follows_followee_id ON follows(followee_id);
 
+CREATE TABLE IF NOT EXISTS likes (
+    post_id    INTEGER NOT NULL REFERENCES posts(id),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (post_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_likes_post_id ON likes(post_id);
+
+CREATE TABLE IF NOT EXISTS comments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id    INTEGER NOT NULL REFERENCES posts(id),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id),
@@ -126,6 +143,13 @@ class DataStore:
 
     # ------------------------------------------------------------------ posts
 
+    def getPostById(self, id):
+        row = self._conn.execute(
+            "SELECT id, author_id, content, created_at FROM posts WHERE id = ?",
+            (id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def createPost(self, author_id, content):
         """写入帖子（内容不做长度校验，规则归 FP-013），返回完整帖子对象."""
         created_at = _now()
@@ -180,6 +204,52 @@ class DataStore:
             "SELECT followee_id FROM follows WHERE follower_id = ?", (user_id,)
         ).fetchall()
         return [row[0] for row in rows]
+
+    # ------------------------------------------------- likes / comments（FP-016）
+
+    def addLike(self, post_id, user_id):
+        """点赞（幂等）：已点赞则不重复插入；返回是否新建（内容规则归 FP-016 服务层）."""
+        cursor = self._conn.execute(
+            "INSERT OR IGNORE INTO likes (post_id, user_id, created_at)"
+            " VALUES (?, ?, ?)",
+            (post_id, user_id, _now()),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def getLikesByPostId(self, post_id):
+        """取帖全部点赞；顺序不保证（过滤 / 排序语义归 FP-016 服务层）."""
+        rows = self._conn.execute(
+            "SELECT post_id, user_id, created_at FROM likes WHERE post_id = ?",
+            (post_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def addComment(self, post_id, user_id, content):
+        """写入评论（内容不做长度校验，规则归 FP-016 服务层），返回完整评论对象."""
+        created_at = _now()
+        cursor = self._conn.execute(
+            "INSERT INTO comments (post_id, user_id, content, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (post_id, user_id, content, created_at),
+        )
+        self._conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "post_id": post_id,
+            "user_id": user_id,
+            "content": content,
+            "created_at": created_at,
+        }
+
+    def getCommentsByPostId(self, post_id):
+        """取帖全部评论；顺序不保证（过滤 / 排序语义归 FP-016 服务层）."""
+        rows = self._conn.execute(
+            "SELECT id, post_id, user_id, content, created_at FROM comments"
+            " WHERE post_id = ?",
+            (post_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     # --------------------------------------------------------------- sessions
 

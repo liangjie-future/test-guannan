@@ -301,6 +301,34 @@ page.render({ id, username });                     // → 时间线内容区 HTM
 curl -i -H 'Cookie: session_token=seed-token-1' http://127.0.0.1:3000/timeline
 ```)
 
+## FP-016 好友帖子的点赞评论共同好友可见性
+
+互动服务（`services.EngagementService`，消费 FP-001 存储）：点赞 / 评论写入 +
+可见性规则——每个用户查看好友帖子时，只能看到自己与帖子作者**共同好友**的
+点赞和评论（共同好友 = 双方都关注的人，与时间线「好友 = 被关注者」同口径；
+查看者本人与帖主自身的互动始终可见，微信朋友圈「朋友点赞评论可见」语义）：
+
+```python
+from services import EngagementService
+from storage import DataStore
+
+svc = EngagementService(DataStore("data/social.db"))
+svc.like(user_id, post_id)            # → {status: OK, created} | {status: ERROR, reason}
+svc.comment(user_id, post_id, "hi")   # → {status: OK, comment}  | {status: ERROR, reason}
+svc.getVisibleEngagement(viewer_id, post_id)
+# → {"post_id", "likes": [{post_id, user_id, username, created_at}, ...],
+#     "comments": [{id, post_id, user_id, username, content, created_at}, ...]}
+```
+
+评论内容规则与发帖同口径（去首尾空白、按码点计 1–280 字）；点赞幂等
+（重复返回 `created: False`）；错误 `USER_NOT_FOUND` / `POST_NOT_FOUND` /
+`EMPTY_CONTENT` / `TOO_LONG`，失败不落记录。可见性每次查询按关注图实时计算
+（新关注立即生效），可见条目按 `created_at` 真实瞬间升序并补全 `username`；
+帖子不存在 → 两组皆空（查询无错误分支，口径同 FP-015）。存储层同步扩展
+likes / comments 两表与 `getPostById` / `addLike` / `getLikesByPostId` /
+`addComment` / `getCommentsByPostId` 五原语（FP-001 契约追加）。页面集成与
+时间线条目挂载为后续消费面，验证用例见 `tests/test_engagement.py`。
+
 ## 开发与测试
 
 ```bash
