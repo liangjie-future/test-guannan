@@ -20,6 +20,7 @@ import { createMemorySocialStore } from './social-store.js';
 import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
 import { parseLikeActionPath, createLikeActionService } from './like-action.js';
+import { createCommentAction, parseCommentActionPath } from './comment-action.js';
 import { createMemoryInteractionStore } from './interaction-store.js';
 
 /**
@@ -33,6 +34,8 @@ import { createMemoryInteractionStore } from './interaction-store.js';
  * + FP-014 时间线页面（getTimeline 注入即生效，/ 已登录默认落点 → /timeline）。)
  * + FP-007 点赞动作（likeStore 注入即生效：POST /posts/<id>/like
  *   toggle 切换点赞 / 取消，PRG 302 /timeline）。
+ * + FP-008 评论提交动作（POST /posts/<id>/comment：createComment 注入即生效，
+ *   校验口径同发帖链路，失败按 §3.2-4 回显参数 PRG 回 /timeline）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）与关注动作挂 requireLogin 守卫、/logout 变为
@@ -73,6 +76,7 @@ export function createWebServer({
   usersPage = null,
   likeStore = null,
   getTimeline,
+  createComment = null,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -80,6 +84,9 @@ export function createWebServer({
   const registerPage = createRegisterPage({ registerService });
   const composePage = createComposePage({
     createPost: createPost ?? createMockPostService().createPost,
+  });
+  const commentAction = createCommentAction({
+    createComment: createComment ?? createMemoryInteractionStore().createComment,
   });
   const routes = createRoutes({ getTimeline });
   const likeAction = likeStore === null ? null : createLikeActionService({ store: likeStore });
@@ -180,6 +187,13 @@ export function createWebServer({
     response.end();
   }
 
+  /** FP-008 评论提交动作（登录守卫先行 + 委托处理器：405 / 413 / 校验 / PRG）。 */
+  async function handleCommentAction(request, response, postId) {
+    const viewer = requireActionLogin(request, response);
+    if (viewer === null) return;
+    await commentAction.handleCommentAction(request, response, viewer, postId);
+  }
+
   async function handleRequest(request, response) {
     let url;
     try {
@@ -199,6 +213,12 @@ export function createWebServer({
     const likePostId = likeAction === null ? null : parseLikeActionPath(pathname);
     if (likePostId !== null) {
       handleLikeAction(request, response, likePostId);
+      return;
+    }
+
+    const commentPostId = parseCommentActionPath(pathname);
+    if (commentPostId !== null) {
+      await handleCommentAction(request, response, commentPostId);
       return;
     }
 
