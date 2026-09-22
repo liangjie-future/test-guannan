@@ -19,6 +19,8 @@ import { readFormBody } from './form-body.js';
 import { createMemorySocialStore } from './social-store.js';
 import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
+import { parseLikeActionPath, createLikeActionService } from './like-action.js';
+import { createMemoryInteractionStore } from './interaction-store.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -29,6 +31,8 @@ import { createUsersPage, parseFollowActionPath } from './users-page.js';
  * + FP-010 用户列表页（usersPage 注入即生效：GET /users 动态渲染、
  *   POST /users/<id>/follow 关注动作）。
  * + FP-014 时间线页面（getTimeline 注入即生效，/ 已登录默认落点 → /timeline）。)
+ * + FP-007 点赞动作（likeStore 注入即生效：POST /posts/<id>/like
+ *   toggle 切换点赞 / 取消，PRG 302 /timeline）。
  *
  * 注入 sessionAccess 时：currentUser 取会话凭据解析、受限三页
  * （/users /compose /timeline）与关注动作挂 requireLogin 守卫、/logout 变为
@@ -67,6 +71,7 @@ export function createWebServer({
   createPost = null,
   login = createMockLoginService(),
   usersPage = null,
+  likeStore = null,
   getTimeline,
 } = {}) {
   const layout = createLayout({
@@ -77,6 +82,7 @@ export function createWebServer({
     createPost: createPost ?? createMockPostService().createPost,
   });
   const routes = createRoutes({ getTimeline });
+  const likeAction = likeStore === null ? null : createLikeActionService({ store: likeStore });
 
   async function handleCompose(request, response, user) {
     if (request.method === 'POST') {
@@ -136,24 +142,41 @@ export function createWebServer({
     sendHtml(response, html);
   }
 
-  /** FP-010 关注动作（仅注入 usersPage 时可达）：登录门槛 + 委托页面处理 + PRG 跳回。 */
-  function handleFollowAction(request, response, followeeId) {
+  /** 动作路由共用登录门槛：已登录放行 viewer；未登录写 302 /login 并返回 null。 */
+  function requireActionLogin(request, response) {
     const viewer = sessionAccess
       ? sessionAccess.requireLogin(request, response)
       : getCurrentUser(request);
-    if (viewer === null) {
-      if (!sessionAccess) {
-        response.writeHead(302, { Location: LOGIN_PATH });
-        response.end();
-      }
-      return;
+    if (viewer === null && !sessionAccess) {
+      response.writeHead(302, { Location: LOGIN_PATH });
+      response.end();
     }
+    return viewer;
+  }
+
+  /** FP-010 关注动作（仅注入 usersPage 时可达）：登录门槛 + 委托页面处理 + PRG 跳回。 */
+  function handleFollowAction(request, response, followeeId) {
+    const viewer = requireActionLogin(request, response);
+    if (viewer === null) return;
     if (request.method !== 'POST') {
       sendText(response, 405, 'method not allowed\n', { Allow: 'POST' });
       return;
     }
     const { status, location } = usersPage.handleFollowAction({ currentUser: viewer, followeeId });
     response.writeHead(status, { Location: location });
+    response.end();
+  }
+
+  /** FP-007 点赞动作（仅注入 likeStore 时可达）：登录门槛 + toggle 切换 + PRG 跳回时间线。 */
+  function handleLikeAction(request, response, postId) {
+    const viewer = requireActionLogin(request, response);
+    if (viewer === null) return;
+    if (request.method !== 'POST') {
+      sendText(response, 405, 'method not allowed\n', { Allow: 'POST' });
+      return;
+    }
+    likeAction.toggleLike(postId, viewer.id);
+    response.writeHead(302, { Location: TIMELINE_PATH });
     response.end();
   }
 
@@ -170,6 +193,12 @@ export function createWebServer({
     const followeeId = usersPage === null ? null : parseFollowActionPath(pathname);
     if (followeeId !== null) {
       handleFollowAction(request, response, followeeId);
+      return;
+    }
+
+    const likePostId = likeAction === null ? null : parseLikeActionPath(pathname);
+    if (likePostId !== null) {
+      handleLikeAction(request, response, likePostId);
       return;
     }
 
@@ -305,6 +334,7 @@ export function webUsers() {
  * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
  * FP-010 默认注入种子内存社交 store 的用户列表页（§6 Mock 策略）。
  * FP-014 未注入 getTimeline 时 /timeline 使用默认 §6 Mock（场景 A 种子帖子流）。)
+ * FP-007 默认注入 FP-005 内存互动 store 的点赞存取（likeStore，§3.2 契约）。
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
@@ -321,11 +351,14 @@ export async function startServer(config = loadConfig()) {
     follow: followService.follow,
     getFolloweeIds: followService.getFolloweeIds,
   });
+  // FP-007 点赞存取：FP-005 内存实现按 §3.2 契约提供（Python 桥接属集成点）。
+  const interactionStore = createMemoryInteractionStore();
   const server = createWebServer({
     sessionAccess,
     registerService,
     createPost: postService.createPost,
     usersPage,
+    likeStore: interactionStore,
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
