@@ -329,6 +329,32 @@ likes / comments 两表与 `getPostById` / `addLike` / `getLikesByPostId` /
 `addComment` / `getCommentsByPostId` 五原语（FP-001 契约追加）。页面集成与
 时间线条目挂载为后续消费面，验证用例见 `tests/test_engagement.py`。
 
+## FP-008 评论提交动作
+
+评论动作路由（`src/comment-action.js`，`POST /posts/<id>/comment`，命名对齐
+FP-010 关注动作风格）：登录守卫先行（未登录 302 `/login`、无评论记录），
+校验口径与发帖链路完全一致（去首尾空白后非空、按 Unicode 码点计 1–280 含
+边界），成功 `createComment` 落库（trim 后文本）并 PRG 302 回 `/timeline`；
+失败不落库，302 携回显参数回跳，供 FP-006 时间线互动区渲染：
+
+```
+/timeline?comment_failed_post=<postId>&comment_error=EMPTY_CONTENT|TOO_LONG&comment_text=<URL 编码原输入>
+```
+
+```js
+import { createWebServer } from './src/server.js';
+import { createMemoryInteractionStore } from './src/interaction-store.js';
+
+const store = createMemoryInteractionStore({ comments: [] });  // FP-005 内存实现
+createWebServer({ createComment: store.createComment });       // 端口可注入
+```
+
+`createComment` 为 FP-002 §3.2 契约端口（Node 侧由 FP-005 内存 store 默认
+提供，Python SQLite 桥接属集成点，替换注入即收口）；非 POST 请求 405
+（`Allow: POST`）、请求体上限 / 缺字段归一复用 `readFormBody` 口径；不提供
+回复 / 嵌套 / 编辑 / 删除路径（上游 D7）。验证用例（验收 1–5 对应 A 组）
+见 `tests/comment-action.test.js`。
+
 ## 开发与测试
 
 ```bash
