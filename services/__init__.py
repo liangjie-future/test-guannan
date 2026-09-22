@@ -14,6 +14,7 @@ from services.follow import (
     FollowService,
     SelfFollowNotAllowedError,
 )
+from services.interactions import InteractionVisibilityService
 from services.login import LOGIN_ERROR_MESSAGE, LoginService
 from services.posting import (
     MAX_POST_LENGTH,
@@ -43,6 +44,7 @@ __all__ = [
     "FolloweeNotFoundError",
     "FollowService",
     "SelfFollowNotAllowedError",
+    "InteractionVisibilityService",
     "LOGIN_ERROR_MESSAGE",
     "LoginService",
     "MAX_POST_LENGTH",
