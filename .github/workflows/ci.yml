@@ -5,8 +5,8 @@ on:
   pull_request:
 
 jobs:
-  test:
-    name: test
+  node:
+    name: node
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,12 +14,31 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm ci
+      - run: npm test
+
+  browser:
+    name: browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: python -m pip install -r requirements-dev.txt
-      - run: npm test
-      - run: npm run test:browser
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
       - run: python3 -m pytest -q

@@ -1,6 +1,6 @@
 # 测试场景 TG-N01：登录页密码显示/隐藏
 
-测试文件：`tests/login-page.test.js`（渲染契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）、`tests/browser/login-password-toggle.spec.js`（真实 Chromium 交互，共 5 个浏览器场景）。
+测试文件：`tests/login-page.test.js`（渲染契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）、`tests/browser/login-password-toggle.spec.js`（真实 Chromium 交互，共 5 个浏览器场景）。浏览器场景必须通过 Playwright 执行；Node 测试中的 HTML/脚本断言不能替代交互验收。
 
 ## 渲染
 
@@ -31,17 +31,21 @@ npm run test:browser
 python3 -m pytest -q
 ```
 
-CI 使用 Ubuntu、Node 20、Chromium 和 Python 3.12 执行上述命令。Python 依赖由
-`requirements-dev.txt` 安装；本地等价步骤为 `python3 -m pip install -r requirements-dev.txt`。
-验证报告应记录每条命令的退出码和测试摘要，不能以未安装 pytest 的环境结果作为通过依据。
+CI 使用三个独立的 required check：`node`、`browser`、`python`。其中 `browser` 使用
+Ubuntu、Node 20 和 Chromium；`python` 使用 Python 3.12。Python 依赖由
+`requirements-dev.txt` 安装；本地可执行 `npm run test:python`，它会先在 `.venv` 安装锁定依赖，
+再通过该环境执行规定的 `python3 -m pytest -q`。验证报告应记录每条命令的退出码和测试摘要，
+不能以未安装 pytest 的环境结果作为通过依据。
 
 ## 最近验证报告
 
 | 命令 | 退出码 | 摘要 |
 | --- | ---: | --- |
 | `npm test` | 0 | 166 passed |
-| `python3 -m pytest -q` (CI: Python 3.12) | 0 | 223 passed |
-| `npm run test:browser` (CI: Ubuntu Chromium) | 0 | 5 passed |
+| `python3 -m pytest -q` (local `.venv`) | 0 | 223 passed in 10.58s |
+| `npm run test:browser` (CI: Ubuntu Chromium) | 待 CI | 待 CI check 报告 |
 
-本地 Python 等价命令为 `.venv/bin/python -m pytest -q`，本次结果为退出码 0、223 passed in 10.42s。
-本开发容器为 ARM64，无法执行 Playwright 下载的 Ubuntu Chromium binary；因此本地浏览器命令未被记为通过。Ubuntu CI 的 `test` job 安装 Chromium 后运行该命令并发布实际 check 结果，不能用本地缺少可执行浏览器替代。
+本地 Python 命令应使用 `npm run test:python` 完成依赖安装后再报告结果。本开发容器
+此前没有安装 pytest，且为 ARM64，无法将本地缺少依赖或浏览器作为通过依据；Ubuntu CI
+分别运行 `python3 -m pytest -q` 与 `npm run test:browser` 并发布 `python`、`browser`
+两个实际 check 结果。
