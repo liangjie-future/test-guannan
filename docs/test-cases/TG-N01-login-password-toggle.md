@@ -1,6 +1,6 @@
 # 测试场景 TG-N01：登录页密码显示/隐藏
 
-测试文件：`tests/login-page.test.js`（渲染与脚本契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）。
+测试文件：`tests/login-page.test.js`（渲染契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）、`tests/browser/login-password-toggle.spec.js`（真实 Chromium 交互）。
 
 ## 渲染
 
@@ -27,5 +27,20 @@
 
 ```bash
 npm test
+npm run test:browser
 python3 -m pytest -q
 ```
+
+CI 使用 Ubuntu、Node 20、Chromium 和 Python 3.12 执行上述命令。Python 依赖由
+`requirements-dev.txt` 安装；本地等价步骤为 `python3 -m pip install -r requirements-dev.txt`。
+验证报告应记录每条命令的退出码和测试摘要，不能以未安装 pytest 的环境结果作为通过依据。
+
+## 最近验证报告
+
+| 命令 | 退出码 | 摘要 |
+| --- | ---: | --- |
+| `npm test` | 0 | 166 passed |
+| `python3 -m pytest -q` | 0 | 223 passed in 9.99s |
+| `npm run test:browser` | CI required | 3 Chromium interaction tests; browser is installed by the CI workflow |
+
+当前开发容器没有可执行的浏览器运行时，因而不能把本地缺少浏览器的启动错误记录为交互测试通过；合并门禁中的 Ubuntu CI 必须执行并报告该命令的实际退出码。
