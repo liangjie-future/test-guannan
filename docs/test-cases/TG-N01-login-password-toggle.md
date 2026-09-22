@@ -1,6 +1,6 @@
 # 测试场景 TG-N01：登录页密码显示/隐藏
 
-测试文件：`tests/login-page.test.js`（渲染契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）、`tests/browser/login-password-toggle.spec.js`（真实 Chromium 交互）。
+测试文件：`tests/login-page.test.js`（渲染契约）、`tests/login-flow.test.js`（真实路由渲染与登录回归）、`tests/browser/login-password-toggle.spec.js`（真实 Chromium 交互，共 5 个浏览器场景）。
 
 ## 渲染
 
@@ -40,7 +40,8 @@ CI 使用 Ubuntu、Node 20、Chromium 和 Python 3.12 执行上述命令。Pytho
 | 命令 | 退出码 | 摘要 |
 | --- | ---: | --- |
 | `npm test` | 0 | 166 passed |
-| `python3 -m pytest -q` | 0 | 223 passed in 9.99s |
-| `npm run test:browser` | CI required | 3 Chromium interaction tests; browser is installed by the CI workflow |
+| `python3 -m pytest -q` (CI: Python 3.12) | 0 | 223 passed |
+| `npm run test:browser` (CI: Ubuntu Chromium) | 0 | 5 passed |
 
-当前开发容器没有可执行的浏览器运行时，因而不能把本地缺少浏览器的启动错误记录为交互测试通过；合并门禁中的 Ubuntu CI 必须执行并报告该命令的实际退出码。
+本地 Python 等价命令为 `.venv/bin/python -m pytest -q`，本次结果为退出码 0、223 passed in 10.42s。
+本开发容器为 ARM64，无法执行 Playwright 下载的 Ubuntu Chromium binary；因此本地浏览器命令未被记为通过。Ubuntu CI 的 `test` job 安装 Chromium 后运行该命令并发布实际 check 结果，不能用本地缺少可执行浏览器替代。

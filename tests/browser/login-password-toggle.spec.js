@@ -76,3 +76,46 @@ test('the submit control retains the normal POST login flow', async ({ page }) =
   expect(response[0].status()).toBe(302);
   await expect(page).toHaveURL(`${handle.url}timeline`);
 });
+
+test('a failed login reloads the hidden default without retaining input values', async ({ page }) => {
+  await page.locator('#login-username').fill('bob');
+  await page.locator('#login-password').fill('wrong-password');
+  await page.locator('[aria-controls="login-password"]').click();
+  await expect(page.locator('#login-password')).toHaveAttribute('type', 'text');
+
+  await Promise.all([
+    page.waitForResponse((res) => res.request().method() === 'POST' && res.url().endsWith('/login')),
+    page.locator('[data-testid="login-submit"]').click(),
+  ]);
+
+  await expect(page).toHaveURL(`${handle.url}login`);
+  await expect(page.locator('[data-testid="login-error"]')).toHaveText('用户名或密码错误');
+  await expect(page.locator('#login-password')).toHaveAttribute('type', 'password');
+  await expect(page.locator('[aria-controls="login-password"]')).toHaveText('显示密码');
+  await expect(page.locator('[aria-controls="login-password"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#login-username')).toHaveValue('');
+  await expect(page.locator('#login-password')).toHaveValue('');
+});
+
+test('without JavaScript the native password field and submit still work', async ({ browser }) => {
+  const context = await browser.newContext({ javaScript: false });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${handle.url}login`);
+    await expect(page.locator('#login-password')).toHaveAttribute('type', 'password');
+    await expect(page.locator('[data-testid="login-submit"]')).toBeVisible();
+
+    await page.locator('#login-username').fill('bob');
+    await page.locator('#login-password').fill('wrong-password');
+    await Promise.all([
+      page.waitForResponse((res) => res.request().method() === 'POST' && res.url().endsWith('/login')),
+      page.locator('[data-testid="login-submit"]').click(),
+    ]);
+
+    await expect(page).toHaveURL(`${handle.url}login`);
+    await expect(page.locator('[data-testid="login-error"]')).toHaveText('用户名或密码错误');
+    await expect(page.locator('#login-password')).toHaveAttribute('type', 'password');
+  } finally {
+    await context.close();
+  }
+});
