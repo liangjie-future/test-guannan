@@ -7,7 +7,8 @@ from pathlib import Path
 
 DEFAULT_SESSION_TTL = timedelta(days=7)
 
-_AUTHOR_ID_CHUNK_SIZE = 500
+# IN (...) 查询分块上限：防 SQLite 绑定变量数限制（口径同 getPostsByAuthorIds）
+_ID_CHUNK_SIZE = 500
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -169,8 +170,8 @@ class DataStore:
         """按作者集合取帖：保证集合完备，顺序不保证（过滤 / 排序语义归 FP-015）."""
         ids = list(dict.fromkeys(author_ids))
         posts = []
-        for start in range(0, len(ids), _AUTHOR_ID_CHUNK_SIZE):
-            chunk = ids[start : start + _AUTHOR_ID_CHUNK_SIZE]
+        for start in range(0, len(ids), _ID_CHUNK_SIZE):
+            chunk = ids[start : start + _ID_CHUNK_SIZE]
             placeholders = ", ".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT id, author_id, content, created_at FROM posts"
@@ -205,7 +206,7 @@ class DataStore:
         ).fetchall()
         return [row[0] for row in rows]
 
-    # ------------------------------------------------- likes / comments（FP-016）
+    # ------------------------------------------- likes / comments（FP-002 / FP-016）
 
     def addLike(self, post_id, user_id):
         """点赞（幂等）：已点赞则不重复插入；返回是否新建（内容规则归 FP-016 服务层）."""
@@ -225,8 +226,11 @@ class DataStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def addComment(self, post_id, user_id, content):
-        """写入评论（内容不做长度校验，规则归 FP-016 服务层），返回完整评论对象."""
+    def createComment(self, post_id, user_id, content):
+        """写入评论（存储层不做内容校验，1–280 字规则归上层），返回完整评论行.
+
+        同一用户对同一帖子可多次评论（全部保留，无唯一约束）。
+        """
         created_at = _now()
         cursor = self._conn.execute(
             "INSERT INTO comments (post_id, user_id, content, created_at)"
@@ -242,14 +246,35 @@ class DataStore:
             "created_at": created_at,
         }
 
+    def getCommentsByPostIds(self, post_ids):
+        """按帖集合取评论：created_at 正序（早→晚），同时刻按 id 升序.
+
+        集合完备（可见性过滤归 FP-004 服务层）；入参去重；空入参返回 []。
+        排序以收集后的单次排序为唯一权威（IN 分块查询不保证跨块有序）；
+        created_at 为同格式 UTC ISO 文本，字典序即时间序，跨时区偏移文本的
+        瞬间归一归服务层（口径同 FP-015 / FP-016）。
+        """
+        ids = list(dict.fromkeys(post_ids))
+        comments = []
+        for start in range(0, len(ids), _ID_CHUNK_SIZE):
+            chunk = ids[start : start + _ID_CHUNK_SIZE]
+            placeholders = ", ".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT id, post_id, user_id, content, created_at FROM comments"
+                f" WHERE post_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            comments.extend(dict(row) for row in rows)
+        comments.sort(key=lambda row: (row["created_at"], row["id"]))
+        return comments
+
+    def addComment(self, post_id, user_id, content):
+        """FP-016 规范名：同 createComment（唯一实现见 createComment）."""
+        return self.createComment(post_id, user_id, content)
+
     def getCommentsByPostId(self, post_id):
-        """取帖全部评论；顺序不保证（过滤 / 排序语义归 FP-016 服务层）."""
-        rows = self._conn.execute(
-            "SELECT id, post_id, user_id, content, created_at FROM comments"
-            " WHERE post_id = ?",
-            (post_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        """FP-016 规范名：单帖查询，委托 getCommentsByPostIds（顺序不保证契约不破坏）."""
+        return self.getCommentsByPostIds([post_id])
 
     # --------------------------------------------------------------- sessions
 
