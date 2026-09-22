@@ -8,7 +8,7 @@ from pathlib import Path
 DEFAULT_SESSION_TTL = timedelta(days=7)
 
 # IN (...) 查询分块上限：防 SQLite 绑定变量数限制（口径同 getPostsByAuthorIds）
-_ID_CHUNK_SIZE = 500
+_ID_LIST_CHUNK_SIZE = 500
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS likes (
     PRIMARY KEY (post_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_likes_post_id ON likes(post_id);
+CREATE INDEX IF NOT EXISTS idx_likes_user_id ON likes(user_id);
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +77,13 @@ class SelfFollowError(StorageError):
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _chunked_unique(ids):
+    """去重（保序）后按 SQLite 绑定变量上限分块，供 IN 查询复用."""
+    unique = list(dict.fromkeys(ids))
+    for start in range(0, len(unique), _ID_LIST_CHUNK_SIZE):
+        yield unique[start : start + _ID_LIST_CHUNK_SIZE]
 
 
 class DataStore:
@@ -168,10 +176,8 @@ class DataStore:
 
     def getPostsByAuthorIds(self, author_ids):
         """按作者集合取帖：保证集合完备，顺序不保证（过滤 / 排序语义归 FP-015）."""
-        ids = list(dict.fromkeys(author_ids))
         posts = []
-        for start in range(0, len(ids), _ID_CHUNK_SIZE):
-            chunk = ids[start : start + _ID_CHUNK_SIZE]
+        for chunk in _chunked_unique(author_ids):
             placeholders = ", ".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT id, author_id, content, created_at FROM posts"
@@ -206,7 +212,40 @@ class DataStore:
         ).fetchall()
         return [row[0] for row in rows]
 
-    # ------------------------------------------- likes / comments（FP-002 / FP-016）
+    # ------------------------------------------- likes / comments（FP-001 / FP-002 / FP-016）
+
+    def likePost(self, post_id, user_id):
+        """点赞写入（幂等）：一人一帖恰一条，重复执行仍恰一条、不抛错.
+
+        与既有 addLike 同一 INSERT OR IGNORE 语义（created_at 随写），
+        过滤 / 计数规则归 FP-004 消费方。
+        """
+        return self.addLike(post_id, user_id)
+
+    def unlikePost(self, post_id, user_id):
+        """取消点赞＝删行；幂等（记录不存在也不报错）."""
+        self._conn.execute(
+            "DELETE FROM likes WHERE post_id = ? AND user_id = ?",
+            (post_id, user_id),
+        )
+        self._conn.commit()
+
+    def getLikesByPostIds(self, post_ids):
+        """按帖 id 集合取全量点赞记录 [{post_id, user_id, created_at}].
+
+        集合完备、顺序不保证（过滤 / 排序语义归 FP-004）；入参去重，
+        空入参返回空列表。
+        """
+        likes = []
+        for chunk in _chunked_unique(post_ids):
+            placeholders = ", ".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT post_id, user_id, created_at FROM likes"
+                f" WHERE post_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            likes.extend(dict(row) for row in rows)
+        return likes
 
     def addLike(self, post_id, user_id):
         """点赞（幂等）：已点赞则不重复插入；返回是否新建（内容规则归 FP-016 服务层）."""
@@ -254,10 +293,8 @@ class DataStore:
         created_at 为同格式 UTC ISO 文本，字典序即时间序，跨时区偏移文本的
         瞬间归一归服务层（口径同 FP-015 / FP-016）。
         """
-        ids = list(dict.fromkeys(post_ids))
         comments = []
-        for start in range(0, len(ids), _ID_CHUNK_SIZE):
-            chunk = ids[start : start + _ID_CHUNK_SIZE]
+        for chunk in _chunked_unique(post_ids):
             placeholders = ", ".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT id, post_id, user_id, content, created_at FROM comments"
