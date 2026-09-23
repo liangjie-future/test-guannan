@@ -8,7 +8,7 @@ import { escapeHtml } from './html.js';
 import { loadConfig } from './config.js';
 import { defaultCurrentUser } from './current-user.js';
 import { LOGIN_PATH, RESTRICTED_PATHS, createSessionAccess } from './session-access.js';
-import { createMemorySessionStore, seedUsers } from './session-store.js';
+import { seedUsers } from './session-store.js';
 import { REGISTER_PATH, REGISTER_TITLE, createRegisterPage } from './register-page.js';
 import { createMockRegisterService } from './register-service.js';
 import { createComposePage } from './compose.js';
@@ -20,10 +20,8 @@ import { createUsersPage, parseFollowActionPath } from './users-page.js';
 import { createPythonBridge } from './python-bridge.js';
 import {
   createBridgeLoginService,
-  createBridgePostService,
   createBridgeRegisterService,
   createBridgeStore,
-  createBridgeTimelineService,
 } from './bridge-services.js';
 import { createRealSocialService } from './real-social-service.js';
 
@@ -75,6 +73,8 @@ export function createWebServer({
   login = createMockLoginService(),
   usersPage = null,
   getTimeline,
+  createPostUsesSessionToken = false,
+  timelineUsesSessionToken = false,
 } = {}) {
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
@@ -93,8 +93,12 @@ export function createWebServer({
   });
   const composePage = createComposePage({
     createPost: createPost ?? createMockPostService().createPost,
+    useSessionToken: createPostUsesSessionToken,
   });
-  const routes = createRoutes({ getTimeline });
+  const routes = createRoutes({
+    getTimeline,
+    timelineUsesSessionToken,
+  });
 
   async function handleCompose(request, response, user) {
     if (request.method === 'POST') {
@@ -106,7 +110,11 @@ export function createWebServer({
 
       let contentHtml;
       try {
-        contentHtml = await composePage.submit(request, user);
+        contentHtml = await composePage.submit(
+          request,
+          user,
+          sessionAccess?.sessionTokenFromRequest(request) ?? null,
+        );
       } catch (error) {
         sendText(response, error.statusCode ?? 500, `${error.message}\n`);
         return;
@@ -273,7 +281,11 @@ export function createWebServer({
     let content = isRegisterPage
       ? registerPage.renderForm()
       : typeof route.render === 'function'
-        ? route.render({ request, user })
+        ? route.render({
+            request,
+            user,
+            sessionToken: sessionAccess?.sessionTokenFromRequest(request) ?? null,
+          })
         : route.content;
     if (usersPage && pathname === '/users') {
       if (user === null) {
@@ -332,7 +344,7 @@ export function webUsers() {
  * FP-003 默认注入 Python bridge store 的会话访问控制；生产启动不写入种子数据。
  * FP-006 默认 Mock 经 createSessionOnLogin 桥接会话存储：注册成功下发的
  * 凭据即被识别，302 时间线直接呈现已登录导航。
- * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
+ * FP-013 实现产在 Python，生产发帖和时间线均通过真实 social adapter 使用会话 token。
  * FP-010 默认注入 Python bridge 社交 store 的用户列表页。
  * FP-014 默认通过 Python bridge 读取 /timeline 数据；启动时保持数据目录为空。)
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
@@ -351,7 +363,6 @@ export async function startServer(config = loadConfig()) {
   };
   const sessionAccess = createSessionAccess({ store: socialStore });
   const registerService = createBridgeRegisterService(bridge);
-  const createPost = createBridgePostService(bridge);
   const usersPage = createUsersPage({
     listUsers: socialStore.listUsers,
     follow: socialStore.follow,
@@ -360,10 +371,12 @@ export async function startServer(config = loadConfig()) {
   const server = createWebServer({
     sessionAccess,
     registerService,
-    createPost,
+    createPost: social.createPost,
+    createPostUsesSessionToken: true,
     login: createBridgeLoginService(bridge),
     usersPage,
-    getTimeline: createBridgeTimelineService(bridge),
+    getTimeline: social.getTimeline,
+    timelineUsesSessionToken: true,
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);

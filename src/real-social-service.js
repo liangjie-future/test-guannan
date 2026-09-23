@@ -20,6 +20,8 @@ export function createRealSocialService(bridge) {
     currentUser: (sessionToken) => call(bridge, 'current_user', { session_token: sessionToken }).user ?? null,
     listUsers: (sessionToken) => call(bridge, 'list_users', { session_token: sessionToken }),
     follow: (sessionToken, followeeId) => call(bridge, 'follow', { session_token: sessionToken, followee_id: followeeId }),
+    createPost: (sessionToken, content) => call(bridge, 'create_post', { session_token: sessionToken, content }),
+    getTimeline: (sessionToken) => call(bridge, 'timeline', { session_token: sessionToken }).posts,
     logout: (sessionToken) => call(bridge, 'logout', { session_token: sessionToken }),
   };
 }

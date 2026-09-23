@@ -103,9 +103,15 @@ def dispatch(request):
                 FollowService(store).follow(follower_id, followee_id)
                 return envelope(True, {"status": "OK", "created": created})
             if operation == "create_post":
-                return envelope(True, PostService(store).createPost(payload["author_id"], payload["content"]))
+                session = store.getSession(payload.get("session_token", ""))
+                if session is None:
+                    return envelope(True, {"status": "ERROR", "reason": "UNAUTHENTICATED"})
+                return envelope(True, PostService(store).createPost(session["user_id"], payload["content"]))
             if operation == "timeline":
-                return envelope(True, {"posts": TimelineService(store).getTimeline(payload["user_id"])})
+                session = store.getSession(payload.get("session_token", ""))
+                if session is None:
+                    return envelope(True, {"authenticated": False, "posts": []})
+                return envelope(True, {"authenticated": True, "posts": TimelineService(store).getTimeline(session["user_id"])})
             if operation == "logout":
                 store.destroySession(payload.get("session_token", payload.get("token", "")))
                 return envelope(True, {"status": "OK"})
