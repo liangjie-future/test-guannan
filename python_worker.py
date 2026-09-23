@@ -3,16 +3,19 @@
 
 import json
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from services import FollowService, LoginService, PostService, RegistrationService, TimelineService
+from security import hashPassword
 from storage import DataStore, SelfFollowError, UsernameAlreadyExistsError
 
 VERSION = 1
 MAX_LINE = 1024 * 1024
 OPERATIONS = {
-    "health", "register", "login", "current_user", "list_users", "follow",
-    "create_post", "timeline", "logout",
+    "health", "register", "login", "current_user", "user_by_username", "get_session", "list_users", "follow",
+    "create_post", "timeline", "logout", "create_session", "get_followees",
+    "follow_exists", "bootstrap",
 }
 
 
@@ -64,6 +67,11 @@ def dispatch(request):
                     session = store.getSession(payload.get("token", ""))
                     user = store.getUserById(session["user_id"]) if session else None
                 return envelope(True, {"user": {"id": user["id"], "username": user["username"]} if user else None})
+            if operation == "user_by_username":
+                user = store.getUserByUsername(payload["username"])
+                return envelope(True, {"user": {"id": user["id"], "username": user["username"]} if user else None})
+            if operation == "get_session":
+                return envelope(True, {"session": store.getSession(payload.get("token", ""))})
             if operation == "list_users":
                 return envelope(True, {"users": store.listUsers()})
             if operation == "follow":
@@ -76,6 +84,15 @@ def dispatch(request):
             if operation == "logout":
                 store.destroySession(payload.get("token", ""))
                 return envelope(True, {"logged_out": True})
+            if operation == "create_session":
+                return envelope(True, store.createSession(payload["user_id"]))
+            if operation == "get_followees":
+                return envelope(True, {"followee_ids": store.getFolloweeIds(payload["user_id"])})
+            if operation == "follow_exists":
+                return envelope(True, {"exists": store.followExists(payload["follower_id"], payload["followee_id"])})
+            if operation == "bootstrap":
+                bootstrap(store)
+                return envelope(True, {"bootstrapped": True})
     except (KeyError, TypeError, ValueError):
         return fail("INVALID_REQUEST", "invalid request")
     except (UsernameAlreadyExistsError, SelfFollowError):
@@ -83,6 +100,34 @@ def dispatch(request):
     except Exception:
         return fail("STORAGE_ERROR", "storage unavailable")
     return fail("UNKNOWN_OPERATION", "unknown operation")
+
+
+def bootstrap(store):
+    """Create durable demo records without making Node own business state."""
+    users = {}
+    for username, password in (
+        ("bob", "right-password"),
+        ("carol", "carol-password"),
+        ("timeline-viewer", "timeline-viewer-password"),
+    ):
+        user = store.getUserByUsername(username)
+        if user is None:
+            creds = hashPassword(password)
+            user_id = store.createUser(username, creds["hash"], creds["salt"])
+            user = store.getUserById(user_id)
+        users[username] = user["id"]
+
+    for followee in ("bob", "carol"):
+        if not store.followExists(users["timeline-viewer"], users[followee]):
+            store.addFollow(users["timeline-viewer"], users[followee])
+    if not store.getPostsByAuthorIds({users["bob"]}):
+        store.createPost(users["bob"], "刚跑完五公里，状态不错")
+        store.createPost(users["bob"], "早起的鸟儿有虫吃")
+    if not store.getPostsByAuthorIds({users["carol"]}):
+        store.createPost(users["carol"], "读完了《设计数据密集型应用》第九章")
+        store.createPost(users["carol"], "午饭试试新开的那家面馆")
+    if store.getSession("seed-token-1") is None:
+        store._insertSession("seed-token-1", users["timeline-viewer"], timedelta(days=7))
 
 
 def main():

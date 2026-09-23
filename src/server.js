@@ -20,6 +20,14 @@ import { createMemorySocialStore } from './social-store.js';
 import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
 import { createPythonBridge } from './python-bridge.js';
+import {
+  createBridgeBootstrap,
+  createBridgeLoginService,
+  createBridgePostService,
+  createBridgeRegisterService,
+  createBridgeStore,
+  createBridgeTimelineService,
+} from './bridge-services.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -117,7 +125,13 @@ export function createWebServer({
       return;
     }
 
-    const result = login(form.get('username') ?? '', form.get('password') ?? '');
+    let result;
+    try {
+      result = await login(form.get('username') ?? '', form.get('password') ?? '');
+    } catch (error) {
+      sendText(response, error.statusCode ?? 500, `${error.message}\n`);
+      return;
+    }
     if (result.status === 'OK') {
       const headers = { Location: '/timeline' };
       if (sessionAccess) {
@@ -211,15 +225,15 @@ export function createWebServer({
     if (isComposePage) {
       handleCompose(request, response, user).catch((error) => {
         if (!response.headersSent) {
-          sendText(response, 500, `${error.message}\n`);
+          sendText(response, error.statusCode ?? 500, `${error.message}\n`);
         }
       });
       return;
     }
 
     if (request.method === 'POST' && isRegisterPage) {
-      registerPage.handlePost(request, response, { layout }).catch(() => {
-        if (!response.headersSent) sendText(response, 500, 'internal error\n');
+      registerPage.handlePost(request, response, { layout }).catch((error) => {
+        if (!response.headersSent) sendText(response, error.statusCode ?? 500, `${error.message}\n`);
       });
       return;
     }
@@ -268,7 +282,7 @@ export function createWebServer({
         response.destroy(err);
         return;
       }
-      sendText(response, 500, 'internal server error\n');
+      sendText(response, err.statusCode ?? 500, `${err.message ?? 'internal server error'}\n`);
     });
   });
 }
@@ -312,12 +326,11 @@ export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
   const bridge = config.bridge ?? createPythonBridge({ dataDir: config.dataDir });
   bridge.health();
-  const sessionAccess = createSessionAccess({ store: createMemorySessionStore({ users: webUsers() }) });
-  const registerService = createMockRegisterService({
-    createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
-  });
-  const postService = createMockPostService();
-  const socialStore = createMemorySocialStore();
+  createBridgeBootstrap(bridge)();
+  const socialStore = createBridgeStore(bridge);
+  const sessionAccess = createSessionAccess({ store: socialStore });
+  const registerService = createBridgeRegisterService(bridge);
+  const createPost = createBridgePostService(bridge);
   const followService = createFollowService({ store: socialStore });
   const usersPage = createUsersPage({
     listUsers: socialStore.listUsers,
@@ -327,8 +340,10 @@ export async function startServer(config = loadConfig()) {
   const server = createWebServer({
     sessionAccess,
     registerService,
-    createPost: postService.createPost,
+    createPost,
+    login: createBridgeLoginService(bridge),
     usersPage,
+    getTimeline: createBridgeTimelineService(bridge),
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
