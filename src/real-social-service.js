@@ -2,13 +2,24 @@
  * Production-facing bridge adapters for authentication and social actions.
  * The adapter deliberately keeps the Python session token at the boundary.
  */
+import { PythonBridgeError } from './python-bridge.js';
+
+function call(bridge, operation, payload) {
+  try {
+    return bridge.request(operation, payload);
+  } catch (error) {
+    if (error instanceof PythonBridgeError) error.statusCode = 503;
+    throw error;
+  }
+}
+
 export function createRealSocialService(bridge) {
   return {
-    register: (username, password) => bridge.request('register', { username, password }),
-    login: (username, password) => bridge.request('login', { username, password }),
-    currentUser: (sessionToken) => bridge.request('current_user', { session_token: sessionToken }).user ?? null,
-    listUsers: (sessionToken) => bridge.request('list_users', { session_token: sessionToken }),
-    follow: (sessionToken, followeeId) => bridge.request('follow', { session_token: sessionToken, followee_id: followeeId }),
-    logout: (sessionToken) => bridge.request('logout', { session_token: sessionToken }),
+    register: (username, password) => call(bridge, 'register', { username, password }),
+    login: (username, password) => call(bridge, 'login', { username, password }),
+    currentUser: (sessionToken) => call(bridge, 'current_user', { session_token: sessionToken }).user ?? null,
+    listUsers: (sessionToken) => call(bridge, 'list_users', { session_token: sessionToken }),
+    follow: (sessionToken, followeeId) => call(bridge, 'follow', { session_token: sessionToken, followee_id: followeeId }),
+    logout: (sessionToken) => call(bridge, 'logout', { session_token: sessionToken }),
   };
 }
