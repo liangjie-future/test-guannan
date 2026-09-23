@@ -146,7 +146,7 @@ test('H6b: 基线模式（无 sessionAccess）已登录替身 / 同样 302 → /
   });
 });
 
-test('H7: 生产组装（startServer 默认 Mock）有效凭据 /timeline 200 含种子帖子流', async (t) => {
+test('H7: 生产组装不预置种子会话，匿名访问 /timeline 仍受保护', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fp014-prod-'));
   const handle = await startServer({ host: '127.0.0.1', port: 0, dataDir });
   t.after(() =>
@@ -161,13 +161,11 @@ test('H7: 生产组装（startServer 默认 Mock）有效凭据 /timeline 200 �
   assert.equal(anonymous.status, 302, '生产默认启用访问控制');
   assert.equal(anonymous.headers.get('location'), '/login');
 
-  const res = await fetchNoRedirect(`${handle.url}timeline`, {
+  const seeded = await fetchNoRedirect(`${handle.url}timeline`, {
     headers: { cookie: 'session_token=seed-token-1' },
   });
-  assert.equal(res.status, 200);
-  const html = await res.text();
-  assert.equal((html.match(/data-testid="timeline-item"/g) ?? []).length, 4, '默认 Mock 场景 A');
-  assert.ok(html.includes('刚跑完五公里，状态不错'));
+  assert.equal(seeded.status, 302);
+  assert.equal(seeded.headers.get('location'), '/login');
 });
 
 test('H8: POST /timeline 405（仅 GET/HEAD）', async () => {
