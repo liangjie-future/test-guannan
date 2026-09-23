@@ -112,9 +112,9 @@ export function createRegisterPage({ registerService }) {
     let result;
     try {
       result = await registerService.register(username, password);
-    } catch {
-      response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      response.end('internal error\n');
+    } catch (err) {
+      response.writeHead(err.statusCode ?? 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end(`${err.message ?? 'internal error'}\n`);
       return;
     }
 

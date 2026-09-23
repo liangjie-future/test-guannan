@@ -19,6 +19,14 @@ import { readFormBody } from './form-body.js';
 import { createMemorySocialStore } from './social-store.js';
 import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
+import { createPythonBridge } from './python-bridge.js';
+import {
+  createBridgeLoginService,
+  createBridgePostService,
+  createBridgeRegisterService,
+  createBridgeStore,
+  createBridgeTimelineService,
+} from './bridge-services.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -116,7 +124,13 @@ export function createWebServer({
       return;
     }
 
-    const result = login(form.get('username') ?? '', form.get('password') ?? '');
+    let result;
+    try {
+      result = await login(form.get('username') ?? '', form.get('password') ?? '');
+    } catch (error) {
+      sendText(response, error.statusCode ?? 500, `${error.message}\n`);
+      return;
+    }
     if (result.status === 'OK') {
       const headers = { Location: '/timeline' };
       if (sessionAccess) {
@@ -210,15 +224,15 @@ export function createWebServer({
     if (isComposePage) {
       handleCompose(request, response, user).catch((error) => {
         if (!response.headersSent) {
-          sendText(response, 500, `${error.message}\n`);
+          sendText(response, error.statusCode ?? 500, `${error.message}\n`);
         }
       });
       return;
     }
 
     if (request.method === 'POST' && isRegisterPage) {
-      registerPage.handlePost(request, response, { layout }).catch(() => {
-        if (!response.headersSent) sendText(response, 500, 'internal error\n');
+      registerPage.handlePost(request, response, { layout }).catch((error) => {
+        if (!response.headersSent) sendText(response, error.statusCode ?? 500, `${error.message}\n`);
       });
       return;
     }
@@ -267,7 +281,7 @@ export function createWebServer({
         response.destroy(err);
         return;
       }
-      sendText(response, 500, 'internal server error\n');
+      sendText(response, err.statusCode ?? 500, `${err.message ?? 'internal server error'}\n`);
     });
   });
 }
@@ -298,23 +312,22 @@ export function webUsers() {
 
 /**
  * FP-005 启动服务：确保 DATA_DIR 存在（FP-001 持久化承载目录）并监听配置地址。
- * FP-003 默认注入内存 store 的会话访问控制（生产组装，FP-008 webUsers() 种子：
- * alice + 登录替身 bob 进入用户表）。
+ * FP-003 默认注入 Python bridge store 的会话访问控制；生产启动不写入种子数据。
  * FP-006 默认 Mock 经 createSessionOnLogin 桥接会话存储：注册成功下发的
  * 凭据即被识别，302 时间线直接呈现已登录导航。
  * FP-013 实现产在 Python，跨进程桥接属集成点，createPost 暂注入契约同形的内存 Mock（§6）。
- * FP-010 默认注入种子内存社交 store 的用户列表页（§6 Mock 策略）。
- * FP-014 未注入 getTimeline 时 /timeline 使用默认 §6 Mock（场景 A 种子帖子流）。)
+ * FP-010 默认注入 Python bridge 社交 store 的用户列表页。
+ * FP-014 默认通过 Python bridge 读取 /timeline 数据；启动时保持数据目录为空。)
  * @returns {Promise<{server: http.Server, url: string, config: object}>}
  */
 export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
-  const sessionAccess = createSessionAccess({ store: createMemorySessionStore({ users: webUsers() }) });
-  const registerService = createMockRegisterService({
-    createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
-  });
-  const postService = createMockPostService();
-  const socialStore = createMemorySocialStore();
+  const bridge = config.bridge ?? createPythonBridge({ dataDir: config.dataDir });
+  bridge.health();
+  const socialStore = createBridgeStore(bridge);
+  const sessionAccess = createSessionAccess({ store: socialStore });
+  const registerService = createBridgeRegisterService(bridge);
+  const createPost = createBridgePostService(bridge);
   const followService = createFollowService({ store: socialStore });
   const usersPage = createUsersPage({
     listUsers: socialStore.listUsers,
@@ -324,8 +337,10 @@ export async function startServer(config = loadConfig()) {
   const server = createWebServer({
     sessionAccess,
     registerService,
-    createPost: postService.createPost,
+    createPost,
+    login: createBridgeLoginService(bridge),
     usersPage,
+    getTimeline: createBridgeTimelineService(bridge),
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);

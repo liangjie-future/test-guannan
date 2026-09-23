@@ -200,10 +200,18 @@ test('L11: FP-004 基线（未注入 sessionAccess）POST 成功仅 302、GET �
   });
 });
 
-test('L12: 生产组装（startServer 默认注入 bob 种子）登录态端到端贯通', async (t) => {
+test('L12: 生产组装不预置账号，注册后登录态端到端贯通', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fp008-prod-'));
   const handle = await startServer({ host: '127.0.0.1', port: 0, dataDir });
   t.after(() => serverClose(handle.server));
+
+  const registerRes = await fetch(`${handle.url}register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'username=bob&password=right-password',
+    redirect: 'manual',
+  });
+  assert.equal(registerRes.status, 302);
 
   const loginRes = await fetch(`${handle.url}login`, {
     method: 'POST',

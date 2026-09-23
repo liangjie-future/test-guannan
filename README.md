@@ -182,9 +182,9 @@ sessionAccess.logout(token);                // 销毁会话（幂等）
 ```
 
 存取原语按 FP-001 §3.2 契约（`createSession / getSession / destroySession /
-getUserById`）注入；默认内存实现含种子：alice（id=1）、有效会话 `seed-token-1`、
-过期会话 `seed-token-expired`。`./run start` 生产入口默认启用访问控制
-（受限页匿名 302 `/login`，`GET /logout` 销毁会话并清除 Cookie）。
+getUserById`）注入；默认内存实现含验证用种子，但 `./run start` 生产入口使用
+Python bridge store，不会在启动时写入种子数据。生产入口默认启用访问控制（受限页
+匿名 302 `/login`，`GET /logout` 销毁会话并清除 Cookie）。
 
 ## FP-009 登录校验
 
@@ -243,7 +243,7 @@ FP-003 `createSessionOnLogin` 建会话、下发 HttpOnly Cookie 并 302 `/timel
 
 ```bash
 ./run start
-# 浏览器打开 http://127.0.0.1:3000/login → 输入 bob / right-password（§6 Mock 种子）
+# 浏览器打开 http://127.0.0.1:3000/register → 注册账号
 # → 跳转时间线（已登录导航态）→ 点「退出」→ 回未登录态
 ```
 
@@ -276,8 +276,8 @@ createWebServer({ sessionAccess, usersPage });     // GET /users + POST /users/:
 `{status:'ERROR', reason}`（`SELF_FOLLOW_NOT_ALLOWED` / `FOLLOWEE_NOT_FOUND`），
 规则语义与 Python 侧 `services/follow.py` 一致；自己行不渲染关注表单，
 直连自关注 POST 由服务端规则兜底拒绝。匿名访问（含关注动作）302 `/login`
-（FP-003 守卫）。`./run start` 生产入口默认注入（种子内存 store，
-`seed-token-1` 即 alice 会话）。
+（FP-003 守卫）。`./run start` 生产入口使用持久化 Python bridge store，启动时不
+预置用户或会话。
 
 ## FP-014 时间线页面
 
@@ -294,11 +294,11 @@ page.render({ id, username });                     // → 时间线内容区 HTM
 
 - 登录门槛：`/timeline` ∈ FP-003 `RESTRICTED_PATHS`（未登录 302 `/login`）；
 - 默认落点：已登录访问 `/` 302 → `/timeline`（未登录保持 FP-004 演示页）；
-- `getTimeline` 构造注入，未桥接前默认 §6 Mock（场景 A：B/C 各 2 帖倒序种子流；
-  场景 B：空集合供空态验证），联调时替换注入即可。
+- `getTimeline` 构造注入，生产入口通过 Python bridge 读取持久化数据；全新数据目录
+  启动后时间线为空，注册并关注用户后才会出现帖子流。
 
 ```bash
-curl -i -H 'Cookie: session_token=seed-token-1' http://127.0.0.1:3000/timeline
+curl -i http://127.0.0.1:3000/timeline
 ```)
 
 ## 开发与测试
