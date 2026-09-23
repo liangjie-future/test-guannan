@@ -86,7 +86,7 @@ ${inner}
  * 组装发帖页。createPost 为 FP-013 §3.2 契约端口（未实现时注入
  * src/post-service.js 的 Mock）。返回 { formHtml, submit }。
  */
-export function createComposePage({ createPost }) {
+export function createComposePage({ createPost, useSessionToken = false }) {
   if (typeof createPost !== 'function') {
     throw new Error('createComposePage: createPost (FP-013 §3.2) is required');
   }
@@ -113,11 +113,11 @@ ${formFragment('')}`;
   }
 
   /** POST /compose：读表单 → createPost(author_id, content) → 三态结果呈现。 */
-  async function submit(request, user) {
+  async function submit(request, user, sessionToken = null) {
     const params = await readUrlencodedBody(request);
     const content = params.get('content') ?? '';
 
-    const result = createPost(user.id, content);
+    const result = createPost(useSessionToken ? sessionToken : user.id, content);
     if (result.status === 'OK') {
       return successHtml(result.post);
     }

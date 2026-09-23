@@ -108,10 +108,10 @@ ${posts.map((post) => renderPost(post)).join('\n')}
  * render(user) 以登录用户为查询主体；renderAnonymous() 供 FP-004 基线模式
  * （未注入 sessionAccess、无守卫）匿名直访时渲染登录引导而非空态。
  */
-export function createTimelinePage({ getTimeline = createMockGetTimeline() } = {}) {
+export function createTimelinePage({ getTimeline = createMockGetTimeline(), useSessionToken = false } = {}) {
   return {
-    render(user) {
-      return renderTimelinePosts(getTimeline(user.id));
+    render(user, sessionToken = null) {
+      return renderTimelinePosts(getTimeline(useSessionToken ? sessionToken : user.id));
     },
     renderAnonymous() {
       return wrapContent(`  <div class="timeline-anonymous">
