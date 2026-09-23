@@ -16,8 +16,6 @@ import { createMockPostService } from './post-service.js';
 import { loginPageContent } from './login-page.js';
 import { UNIFIED_LOGIN_ERROR_MESSAGE, MOCK_LOGIN_ACCOUNTS, createMockLoginService } from './login-mock.js';
 import { readFormBody } from './form-body.js';
-import { createMemorySocialStore } from './social-store.js';
-import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
 import { createPythonBridge } from './python-bridge.js';
 import {
@@ -27,6 +25,7 @@ import {
   createBridgeStore,
   createBridgeTimelineService,
 } from './bridge-services.js';
+import { createRealSocialService } from './real-social-service.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -80,7 +79,18 @@ export function createWebServer({
   const layout = createLayout({
     getCurrentUser: sessionAccess ? sessionAccess.currentUser : getCurrentUser,
   });
-  const registerPage = createRegisterPage({ registerService });
+  const registerPage = createRegisterPage({
+    registerService,
+    createSessionCookie: (result) => {
+      if (sessionAccess && result.expires_at) {
+        return sessionAccess.sessionCookie({ token: result.session_token, expires_at: result.expires_at });
+      }
+      const session = sessionAccess?.createSessionOnLogin(result.user.id);
+      return sessionAccess
+        ? sessionAccess.sessionCookie(session)
+        : `session_token=${encodeURIComponent(result.session_token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}`;
+    },
+  });
   const composePage = createComposePage({
     createPost: createPost ?? createMockPostService().createPost,
   });
@@ -134,7 +144,9 @@ export function createWebServer({
     if (result.status === 'OK') {
       const headers = { Location: '/timeline' };
       if (sessionAccess) {
-        const session = sessionAccess.createSessionOnLogin(result.user.id);
+        const session = result.expires_at
+          ? { token: result.session_token, expires_at: result.expires_at }
+          : sessionAccess.createSessionOnLogin(result.user.id);
         headers['Set-Cookie'] = sessionAccess.sessionCookie(session);
       }
       response.writeHead(302, headers);
@@ -166,7 +178,8 @@ export function createWebServer({
       sendText(response, 405, 'method not allowed\n', { Allow: 'POST' });
       return;
     }
-    const { status, location } = usersPage.handleFollowAction({ currentUser: viewer, followeeId });
+    const token = sessionAccess?.sessionTokenFromRequest(request) ?? null;
+    const { status, location } = usersPage.handleFollowAction({ currentUser: viewer, sessionToken: token, followeeId });
     response.writeHead(status, { Location: location });
     response.end();
   }
@@ -268,7 +281,11 @@ export function createWebServer({
         response.end();
         return;
       }
-      content = usersPage.renderContent({ currentUser: user, searchParams: url.searchParams });
+      content = usersPage.renderContent({
+        currentUser: user,
+        sessionToken: sessionAccess?.sessionTokenFromRequest(request) ?? null,
+        searchParams: url.searchParams,
+      });
     }
     const title = isRegisterPage ? REGISTER_TITLE : route.title;
     const html = layout.renderPage(request, content, { title });
@@ -324,15 +341,21 @@ export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
   const bridge = config.bridge ?? createPythonBridge({ dataDir: config.dataDir });
   bridge.health();
-  const socialStore = createBridgeStore(bridge);
+  const social = createRealSocialService(bridge);
+  const socialStore = {
+    ...createBridgeStore(bridge),
+    currentUser: social.currentUser,
+    listUsers: social.listUsers,
+    follow: social.follow,
+    destroySession: social.logout,
+  };
   const sessionAccess = createSessionAccess({ store: socialStore });
   const registerService = createBridgeRegisterService(bridge);
   const createPost = createBridgePostService(bridge);
-  const followService = createFollowService({ store: socialStore });
   const usersPage = createUsersPage({
     listUsers: socialStore.listUsers,
-    follow: followService.follow,
-    getFolloweeIds: followService.getFolloweeIds,
+    follow: socialStore.follow,
+    getFolloweeIds: socialStore.getFolloweeIds,
   });
   const server = createWebServer({
     sessionAccess,
