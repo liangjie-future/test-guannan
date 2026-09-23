@@ -17,8 +17,8 @@ export function createBridgeStore(bridge) {
     getUserById(userId) {
       return call(bridge, 'current_user', { user_id: userId }).user ?? null;
     },
-    listUsers() {
-      return call(bridge, 'list_users').users;
+    listUsers(sessionToken) {
+      return call(bridge, 'list_users', { session_token: sessionToken });
     },
     createSession(userId) {
       return call(bridge, 'create_session', { user_id: userId });
@@ -27,16 +27,25 @@ export function createBridgeStore(bridge) {
       return call(bridge, 'get_session', { token }).session;
     },
     destroySession(token) {
-      call(bridge, 'logout', { token });
+      call(bridge, 'logout', { session_token: token });
     },
-    getFolloweeIds(userId) {
-      return call(bridge, 'get_followees', { user_id: userId }).followee_ids;
+    getFolloweeIds(userIdOrToken) {
+      if (typeof userIdOrToken === 'string') {
+        return call(bridge, 'list_users', { session_token: userIdOrToken }).followee_ids;
+      }
+      return call(bridge, 'get_followees', { user_id: userIdOrToken }).followee_ids;
     },
     followExists(followerId, followeeId) {
       return call(bridge, 'follow_exists', { follower_id: followerId, followee_id: followeeId }).exists;
     },
     addFollow(followerId, followeeId) {
       call(bridge, 'follow', { follower_id: followerId, followee_id: followeeId });
+    },
+    currentUser(sessionToken) {
+      return call(bridge, 'current_user', { session_token: sessionToken }).user ?? null;
+    },
+    follow(sessionToken, followeeId) {
+      return call(bridge, 'follow', { session_token: sessionToken, followee_id: followeeId });
     },
   };
 }

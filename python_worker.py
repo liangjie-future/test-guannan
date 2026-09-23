@@ -8,7 +8,8 @@ from pathlib import Path
 
 from services import FollowService, LoginService, PostService, RegistrationService, TimelineService
 from security import hashPassword
-from storage import DataStore, SelfFollowError, UsernameAlreadyExistsError
+from storage import DataStore, UsernameAlreadyExistsError
+from services.follow import FolloweeNotFoundError, SelfFollowNotAllowedError
 
 VERSION = 1
 MAX_LINE = 1024 * 1024
@@ -57,14 +58,23 @@ def dispatch(request):
                 store.getUserById(-1)
                 return envelope(True, {"healthy": True})
             if operation == "register":
-                return envelope(True, RegistrationService(store).register(payload["username"], payload["password"]))
+                result = RegistrationService(store).register(payload["username"], payload["password"])
+                if result["status"] == "OK":
+                    session = store.getSession(result["session_token"])
+                    result["expires_at"] = session["expires_at"]
+                return envelope(True, result)
             if operation == "login":
-                return envelope(True, LoginService(store).login(payload["username"], payload["password"]))
+                result = LoginService(store).login(payload["username"], payload["password"])
+                if result["status"] == "OK":
+                    session = store.getSession(result["session_token"])
+                    result["expires_at"] = session["expires_at"]
+                return envelope(True, result)
             if operation == "current_user":
-                if "user_id" in payload:
+                session_token = payload.get("session_token", payload.get("token", ""))
+                if "user_id" in payload and "session_token" not in payload and "token" not in payload:
                     user = store.getUserById(payload["user_id"])
                 else:
-                    session = store.getSession(payload.get("token", ""))
+                    session = store.getSession(session_token)
                     user = store.getUserById(session["user_id"]) if session else None
                 return envelope(True, {"user": {"id": user["id"], "username": user["username"]} if user else None})
             if operation == "user_by_username":
@@ -73,17 +83,32 @@ def dispatch(request):
             if operation == "get_session":
                 return envelope(True, {"session": store.getSession(payload.get("token", ""))})
             if operation == "list_users":
-                return envelope(True, {"users": store.listUsers()})
+                session = store.getSession(payload.get("session_token", payload.get("token", "")))
+                if session is None:
+                    return envelope(True, {"users": [], "followee_ids": []})
+                return envelope(True, {
+                    "users": store.listUsers(),
+                    "followee_ids": FollowService(store).getFollowees(session["user_id"]),
+                })
             if operation == "follow":
-                FollowService(store).follow(payload["follower_id"], payload["followee_id"])
-                return envelope(True, {"created": True})
+                if "session_token" in payload:
+                    session = store.getSession(payload["session_token"])
+                    if session is None:
+                        return envelope(True, {"created": False, "authenticated": False})
+                    follower_id = session["user_id"]
+                else:
+                    follower_id = payload["follower_id"]
+                followee_id = payload["followee_id"]
+                created = not store.followExists(follower_id, followee_id)
+                FollowService(store).follow(follower_id, followee_id)
+                return envelope(True, {"status": "OK", "created": created})
             if operation == "create_post":
                 return envelope(True, PostService(store).createPost(payload["author_id"], payload["content"]))
             if operation == "timeline":
                 return envelope(True, {"posts": TimelineService(store).getTimeline(payload["user_id"])})
             if operation == "logout":
-                store.destroySession(payload.get("token", ""))
-                return envelope(True, {"logged_out": True})
+                store.destroySession(payload.get("session_token", payload.get("token", "")))
+                return envelope(True, {"status": "OK"})
             if operation == "create_session":
                 return envelope(True, store.createSession(payload["user_id"]))
             if operation == "get_followees":
@@ -95,8 +120,12 @@ def dispatch(request):
                 return envelope(True, {"bootstrapped": True})
     except (KeyError, TypeError, ValueError):
         return fail("INVALID_REQUEST", "invalid request")
-    except (UsernameAlreadyExistsError, SelfFollowError):
-        return fail("SERVICE_ERROR", "service request failed")
+    except UsernameAlreadyExistsError:
+        return envelope(True, {"status": "ERROR", "reason": "USERNAME_TAKEN"})
+    except SelfFollowNotAllowedError:
+        return envelope(True, {"status": "ERROR", "reason": "SELF_FOLLOW_NOT_ALLOWED"})
+    except FolloweeNotFoundError:
+        return envelope(True, {"status": "ERROR", "reason": "FOLLOWEE_NOT_FOUND"})
     except Exception:
         return fail("STORAGE_ERROR", "storage unavailable")
     return fail("UNKNOWN_OPERATION", "unknown operation")

@@ -51,8 +51,8 @@ ${errorBanner}  <form method="post" action="${REGISTER_PATH}" class="register-fo
 </section>`;
 }
 
-function sessionCookie(token) {
-  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
+function sessionCookie(token, maxAge = SESSION_COOKIE_MAX_AGE) {
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 function readBody(request) {
@@ -77,7 +77,7 @@ function readBody(request) {
  * @param {{ registerService: { register: Function } }} options
  * @returns {{ renderForm(options?): string, handlePost(request, response, { layout }) }}
  */
-export function createRegisterPage({ registerService }) {
+export function createRegisterPage({ registerService, createSessionCookie = sessionCookie }) {
   if (!registerService || typeof registerService.register !== 'function') {
     throw new Error('createRegisterPage: registerService.register is required');
   }
@@ -127,7 +127,7 @@ export function createRegisterPage({ registerService }) {
     ) {
       response.writeHead(302, {
         Location: REGISTER_SUCCESS_REDIRECT,
-        'Set-Cookie': sessionCookie(result.session_token),
+        'Set-Cookie': createSessionCookie(result),
       });
       response.end();
       return;

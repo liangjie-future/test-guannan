@@ -57,9 +57,12 @@ export function createUsersPage({ listUsers, follow, getFolloweeIds }) {
 
   return {
     /** 渲染内容区（挂载进 FP-004 统一布局；currentUser 为 FP-003 解析出的登录用户）。 */
-    renderContent({ currentUser, searchParams = null }) {
-      const users = listUsers();
-      const followeeIds = new Set(getFolloweeIds(currentUser.id));
+    renderContent({ currentUser, sessionToken = null, searchParams = null }) {
+      const listed = listUsers(sessionToken);
+      const users = Array.isArray(listed) ? listed : listed.users;
+      const followeeIds = new Set(
+        Array.isArray(listed) ? getFolloweeIds(currentUser.id) : listed.followee_ids,
+      );
       const rows = users
         .map((user) =>
           renderRow(user, {
@@ -85,10 +88,13 @@ ${rows}
     },
 
     /** 关注动作：调用注入的 follow，返回 303 重定向目标（PRG，结果经 notice 反馈）。 */
-    handleFollowAction({ currentUser, followeeId }) {
-      const result = follow(currentUser.id, followeeId);
+    handleFollowAction({ currentUser, sessionToken = null, followeeId }) {
+      const listed = listUsers(sessionToken);
+      const usesSessionToken = !Array.isArray(listed);
+      const result = follow(usesSessionToken ? sessionToken : currentUser.id, followeeId);
       if (result.status === 'OK') {
-        const target = listUsers().find((user) => user.id === followeeId);
+        const users = Array.isArray(listed) ? listed : listed.users;
+        const target = users.find((user) => user.id === followeeId);
         const username = target === undefined ? '' : target.username;
         return {
           status: 303,

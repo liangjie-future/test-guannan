@@ -28,7 +28,10 @@ export function parseCookies(header) {
 }
 
 function secondsUntil(expiresAt) {
-  return Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  const parsed = Date.parse(expiresAt ?? '');
+  return Number.isFinite(parsed)
+    ? Math.max(0, Math.floor((parsed - Date.now()) / 1000))
+    : 7 * 24 * 60 * 60;
 }
 
 /**
@@ -53,6 +56,7 @@ export function createSessionAccess({
   function currentUser(request) {
     const token = sessionTokenFromRequest(request);
     if (token === null) return null;
+    if (typeof store.currentUser === 'function') return store.currentUser(token);
     const session = store.getSession(token);
     if (session === null) return null;
     const user = store.getUserById(session.user_id);
