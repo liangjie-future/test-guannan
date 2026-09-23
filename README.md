@@ -5,7 +5,7 @@ twitter 类社交平台（Step 1：注册登录 / 单向关注 / 280 字发帖 /
 
 ## FP-005 单机部署与运行
 
-要求 Node.js >= 18（Web 端零第三方依赖，无需 `npm install`）。
+要求 Node.js >= 18、Python 3 和 SQLite（均由 Node/Python 标准库提供；Web 端无需 `npm install`）。
 
 ```bash
 cp .env.example .env   # 可选：按需调整 HOST / PORT / DATA_DIR
@@ -15,8 +15,23 @@ curl -i http://127.0.0.1:3000/   # 验证：200 + FP-004 页面骨架
 ```
 
 运行配置仅 `HOST` / `PORT` / `DATA_DIR` 三项（环境变量 > `.env` > 默认值），
-`DATA_DIR` 启动时自动创建。启动 / 停止 / 重启 / 状态 / 排障详见
-[RUNBOOK.md](RUNBOOK.md)；`npm start` 与 `./run start --foreground` 等价直启。
+`DATA_DIR` 启动时自动创建，业务数据库固定为 `${DATA_DIR}/social.db`。启动 / 停止 /
+重启 / 状态 / 排障详见 [RUNBOOK.md](RUNBOOK.md)；`npm start` 与
+`./run start --foreground` 使用相同真实生产装配，守护入口为 `./run start`。
+
+真实入口通过 Node `spawnSync` 调用 Python worker，单次桥接超时 5000ms，stdout/stderr
+分别限制 1 MiB。Python 不可用、协议错误、超时或 SQLite 故障不会降级到 Mock，启动阶段
+会失败，运行阶段返回 HTTP 503，响应不包含密码、session token 或完整堆栈。可用
+`PYTHON_BIN=/path/to/python` 指定解释器；建议使用 venv 安装开发测试依赖：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+```
+
+`health` 成功后才开始监听请求。生产启动不写入 seed；`security.seed` 和
+`storage.seed` 仅允许显式测试/演示时调用，不会由 `npm start` 或 `./run start` 自动执行。
 
 ## FP-001 核心数据模型与存储
 
@@ -307,3 +322,14 @@ curl -i http://127.0.0.1:3000/timeline
 npm test               # Node 端全部测试（node --test：test/ 与 tests/）
 pytest                 # FP-001 存储层 Python 测试（pip install pytest）
 ```
+
+完整 FP-004 真实入口验收会为每个场景创建临时 `DATA_DIR`，通过真实 HTTP 注册和发帖，
+并在 finally 中终止服务、等待端口释放和清理受控进程：
+
+```bash
+node --test tests/integration/real-entry.test.js
+```
+
+验收覆盖 `npm start`、`./run start --foreground`、三用户业务边界、重启恢复、退出失效、
+Python 故障、损坏 SQLite 和异常资源清理。浏览器手工验收可使用任意支持 JavaScript 的现代
+浏览器；自动化验收使用 Node 原生 HTTP，不要求额外浏览器驱动。
