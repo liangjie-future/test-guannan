@@ -80,6 +80,7 @@ function launch(kind, { dataDir, port, pythonBin } = {}) {
   const child = spawn(command[0], command[1], {
     cwd: ROOT,
     env,
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -95,7 +96,11 @@ function launch(kind, { dataDir, port, pythonBin } = {}) {
 
 async function stopManaged(handle) {
   if (handle?.child.exitCode === null) {
-    handle.child.kill('SIGTERM');
+    try {
+      process.kill(-handle.child.pid, 'SIGTERM');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
     await waitForExit(handle.child);
   }
   if (handle) await waitForRefused(handle.url);
