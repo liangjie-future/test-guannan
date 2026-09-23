@@ -19,6 +19,7 @@ import { readFormBody } from './form-body.js';
 import { createMemorySocialStore } from './social-store.js';
 import { createFollowService } from './follow-service.js';
 import { createUsersPage, parseFollowActionPath } from './users-page.js';
+import { createPythonBridge } from './python-bridge.js';
 
 /**
  * FP-004 页面骨架路由 + FP-005 运行载体（配置 / 启动 / 优雅停机）
@@ -309,6 +310,8 @@ export function webUsers() {
  */
 export async function startServer(config = loadConfig()) {
   fs.mkdirSync(config.dataDir, { recursive: true });
+  const bridge = config.bridge ?? createPythonBridge({ dataDir: config.dataDir });
+  bridge.health();
   const sessionAccess = createSessionAccess({ store: createMemorySessionStore({ users: webUsers() }) });
   const registerService = createMockRegisterService({
     createSessionOnLogin: (userId) => sessionAccess.createSessionOnLogin(userId).token,
